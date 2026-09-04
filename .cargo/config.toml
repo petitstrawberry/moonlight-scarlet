@@ -1,0 +1,13 @@
+[target.aarch64-unknown-scarlet]
+linker = "rust-lld"
+
+[target.riscv64gc-unknown-scarlet]
+linker = "rust-lld"
+
+[unstable]
+unstable-options = true
+
+[env]
+CMAKE_TOOLCHAIN_FILE_aarch64_unknown_scarlet = { value = ".cargo/scarlet-cmake-toolchain.cmake", relative = true }
+CMAKE_TOOLCHAIN_FILE_riscv64gc_unknown_scarlet = { value = ".cargo/scarlet-cmake-toolchain.cmake", relative = true }
+OPUS_WARNINGS_AS_ERRORS = "0"

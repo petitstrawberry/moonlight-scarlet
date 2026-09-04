@@ -1,0 +1,28 @@
+[workspace]
+members = ["moonlight", "moonlight-control", "moonlight-sys"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://github.com/petitstrawberry/moonlight-scarlet"
+
+[workspace.dependencies]
+moonlight-control = { path = "moonlight-control" }
+moonlight-sys = { path = "moonlight-sys" }
+
+[patch.crates-io]
+ring = { git = "https://github.com/petitstrawberry/ring.git", branch = "scarlet" }
+socket2 = { git = "https://github.com/petitstrawberry/socket2.git", branch = "scarlet" }
+tokio = { git = "https://github.com/petitstrawberry/tokio.git", branch = "scarlet" }
+
+[profile.dev]
+opt-level = 2
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("scarlet"))'] }

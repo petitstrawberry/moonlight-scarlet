@@ -1,0 +1,29 @@
+[package]
+name = "moonlight"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform ScarletUI frontend for Moonlight Scarlet"
+
+[dependencies]
+moonlight-control.workspace = true
+moonlight-sys.workspace = true
+
+[target.'cfg(target_os = "scarlet")'.dependencies]
+getrandom = { version = "0.2.17", features = ["custom"] }
+scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", branch = "dev", package = "scarlet-sys" }
+scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", branch = "main", package = "scarlet-ui", default-features = false, features = ["std", "platform-sws"] }
+scarlet-video-client = { git = "https://github.com/petitstrawberry/Scarlet", branch = "dev", package = "scarlet-video-client", features = ["h264-stateless-hw"] }
+sas-client = { git = "https://github.com/petitstrawberry/Scarlet", branch = "dev", package = "sas-client" }
+opus-head-sys = { git = "https://github.com/xnorpx/rust-opus.git", rev = "e0ffbd5d90b35374e6bfeb4f9fc2b4c415304479", default-features = false }
+
+[target.'cfg(not(target_os = "scarlet"))'.dependencies]
+scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", branch = "main", package = "scarlet-ui", default-features = false, features = ["std", "platform-winit"] }
+
+[[bin]]
+name = "moonlight"
+path = "src/main.rs"
+
+[lints]
+workspace = true
