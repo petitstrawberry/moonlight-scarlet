@@ -49,6 +49,9 @@ impl SavedHosts {
     /// The saved history, or an empty history when the file does not yet exist.
     pub fn load_from(directory: impl AsRef<Path>) -> Result<Self, ControlError> {
         let path = directory.as_ref().join(HOSTS_FILE);
+        if !path.try_exists()? {
+            return Ok(Self::default());
+        }
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::default()),
