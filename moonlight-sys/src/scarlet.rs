@@ -147,12 +147,15 @@ impl RawMutex {
             if self.state.swap(MUTEX_CONTENDED, Ordering::Acquire) == MUTEX_UNLOCKED {
                 return;
             }
-            let result = syscall3(
-                Syscall::FutexWait,
-                &self.state as *const AtomicU32 as usize,
-                MUTEX_CONTENDED as usize,
-                WAIT_FOREVER,
-            );
+            // SAFETY: The aligned atomic remains alive throughout the synchronous wait.
+            let result = unsafe {
+                syscall3(
+                    Syscall::FutexWait,
+                    &self.state as *const AtomicU32 as usize,
+                    MUTEX_CONTENDED as usize,
+                    WAIT_FOREVER,
+                )
+            };
             if result == usize::MAX {
                 thread::sleep(Duration::from_millis(1));
             }
@@ -161,11 +164,14 @@ impl RawMutex {
 
     fn unlock(&self) {
         if self.state.swap(MUTEX_UNLOCKED, Ordering::Release) == MUTEX_CONTENDED {
-            let _ = syscall2(
-                Syscall::FutexWake,
-                &self.state as *const AtomicU32 as usize,
-                1,
-            );
+            // SAFETY: self keeps the aligned futex word alive for the wake operation.
+            let _ = unsafe {
+                syscall2(
+                    Syscall::FutexWake,
+                    &self.state as *const AtomicU32 as usize,
+                    1,
+                )
+            };
         }
     }
 }
@@ -183,22 +189,28 @@ impl RawConditionVariable {
 
     fn signal(&self) {
         self.sequence.fetch_add(1, Ordering::Release);
-        let _ = syscall2(
-            Syscall::FutexWake,
-            &self.sequence as *const AtomicU32 as usize,
-            1,
-        );
+        // SAFETY: self keeps the aligned futex word alive for the wake operation.
+        let _ = unsafe {
+            syscall2(
+                Syscall::FutexWake,
+                &self.sequence as *const AtomicU32 as usize,
+                1,
+            )
+        };
     }
 
     fn wait(&self, mutex: &RawMutex) {
         let sequence = self.sequence.load(Ordering::Acquire);
         mutex.unlock();
-        let _ = syscall3(
-            Syscall::FutexWait,
-            &self.sequence as *const AtomicU32 as usize,
-            sequence as usize,
-            WAIT_FOREVER,
-        );
+        // SAFETY: The aligned sequence word remains alive throughout the wait.
+        let _ = unsafe {
+            syscall3(
+                Syscall::FutexWait,
+                &self.sequence as *const AtomicU32 as usize,
+                sequence as usize,
+                WAIT_FOREVER,
+            )
+        };
         mutex.lock();
     }
 }
@@ -341,21 +353,21 @@ fn query_socket_address(socket: c_int, peer: bool) -> Result<[u8; 8], c_int> {
     } else {
         Syscall::SocketGetLocalAddress
     };
-    decode_syscall(syscall2(
-        syscall,
-        socket as usize,
-        address.as_mut_ptr() as usize,
-    ))?;
+    // SAFETY: address is writable storage for the native eight-byte socket address.
+    decode_syscall(unsafe { syscall2(syscall, socket as usize, address.as_mut_ptr() as usize) })?;
     Ok(address)
 }
 
 fn set_socket_control(socket: c_int, command: u32, value: usize) -> Result<usize, c_int> {
-    decode_syscall(syscall3(
-        Syscall::HandleControl,
-        socket as usize,
-        command as usize,
-        value,
-    ))
+    // SAFETY: All callers use scalar socket controls, never pointer arguments.
+    decode_syscall(unsafe {
+        syscall3(
+            Syscall::HandleControl,
+            socket as usize,
+            command as usize,
+            value,
+        )
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -365,7 +377,8 @@ extern "C" fn scarlet_errno_location() -> *mut c_int {
 
 #[unsafe(no_mangle)]
 extern "C" fn scarlet_monotonic_time_ns() -> u64 {
-    syscall0(Syscall::MonotonicTime) as u64
+    // SAFETY: MonotonicTime takes no arguments and does not access caller memory.
+    unsafe { syscall0(Syscall::MonotonicTime) as u64 }
 }
 
 #[unsafe(no_mangle)]
@@ -575,9 +588,10 @@ unsafe extern "C" fn export_realloc(pointer: *mut c_void, size: usize) -> *mut c
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn scarlet_write_bytes(bytes: *const c_char, length: usize) {
+unsafe extern "C" fn scarlet_write_bytes(bytes: *const c_char, length: usize) {
     if !bytes.is_null() && length != 0 {
-        let _ = syscall3(Syscall::StreamWrite, 1, bytes as usize, length);
+        // SAFETY: The C caller supplies length readable bytes for the synchronous write.
+        let _ = unsafe { syscall3(Syscall::StreamWrite, 1, bytes as usize, length) };
     }
 }
 
@@ -591,12 +605,15 @@ static FALLBACK_RANDOM: AtomicU64 = AtomicU64::new(0x8f6d_4a21_d3c7_b509);
 #[unsafe(no_mangle)]
 extern "C" fn scarlet_random_u32() -> u32 {
     let mut output = 0u32;
-    let result = syscall3(
-        Syscall::GetRandom,
-        &mut output as *mut u32 as usize,
-        std::mem::size_of::<u32>(),
-        0,
-    );
+    // SAFETY: output is writable and exclusively borrowed for the entire call.
+    let result = unsafe {
+        syscall3(
+            Syscall::GetRandom,
+            &mut output as *mut u32 as usize,
+            std::mem::size_of::<u32>(),
+            0,
+        )
+    };
     if result == std::mem::size_of::<u32>() {
         return output;
     }
@@ -625,12 +642,15 @@ unsafe extern "C" fn mbedtls_hardware_poll(
     if output.is_null() || output_length.is_null() {
         return -1;
     }
-    let result = syscall3(
-        Syscall::GetRandom,
-        output as usize,
-        length,
-        GET_RANDOM_FLAG_REQUIRE_ENTROPY,
-    );
+    // SAFETY: The mbedTLS caller supplies length writable bytes in output.
+    let result = unsafe {
+        syscall3(
+            Syscall::GetRandom,
+            output as usize,
+            length,
+            GET_RANDOM_FLAG_REQUIRE_ENTROPY,
+        )
+    };
     if result != length {
         // SAFETY: The caller supplied a writable output length pointer.
         unsafe { *output_length = 0 };
@@ -647,12 +667,15 @@ extern "C" fn socket(domain: c_int, socket_type: c_int, protocol: c_int) -> c_in
         set_errno(EAFNOSUPPORT);
         return -1;
     }
-    return_int(decode_syscall(syscall3(
-        Syscall::SocketCreate,
-        domain as usize,
-        socket_type as usize,
-        protocol as usize,
-    )))
+    // SAFETY: SocketCreate takes only integer socket parameters.
+    return_int(decode_syscall(unsafe {
+        syscall3(
+            Syscall::SocketCreate,
+            domain as usize,
+            socket_type as usize,
+            protocol as usize,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -665,12 +688,15 @@ unsafe extern "C" fn bind(socket: c_int, address: *const SockAddr, length: u32) 
             return -1;
         }
     };
-    return_int(decode_syscall(syscall3(
-        Syscall::SocketBind,
-        socket as usize,
-        &address as *const NativeInet4Address as usize,
-        std::mem::size_of::<NativeInet4Address>(),
-    )))
+    // SAFETY: The native address is initialized and remains alive for the call.
+    return_int(decode_syscall(unsafe {
+        syscall3(
+            Syscall::SocketBind,
+            socket as usize,
+            &address as *const NativeInet4Address as usize,
+            std::mem::size_of::<NativeInet4Address>(),
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -683,26 +709,34 @@ unsafe extern "C" fn connect(socket: c_int, address: *const SockAddr, length: u3
             return -1;
         }
     };
-    return_int(decode_syscall(syscall3(
-        Syscall::SocketConnect,
-        socket as usize,
-        &address as *const NativeInet4Address as usize,
-        std::mem::size_of::<NativeInet4Address>(),
-    )))
+    // SAFETY: The native address is initialized and remains alive for the call.
+    return_int(decode_syscall(unsafe {
+        syscall3(
+            Syscall::SocketConnect,
+            socket as usize,
+            &address as *const NativeInet4Address as usize,
+            std::mem::size_of::<NativeInet4Address>(),
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn listen(socket: c_int, backlog: c_int) -> c_int {
-    return_int(decode_syscall(syscall2(
-        Syscall::SocketListen,
-        socket as usize,
-        backlog.max(0) as usize,
-    )))
+    // SAFETY: SocketListen takes a descriptor and an integer backlog, not pointers.
+    return_int(decode_syscall(unsafe {
+        syscall2(
+            Syscall::SocketListen,
+            socket as usize,
+            backlog.max(0) as usize,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn accept(socket: c_int, address: *mut SockAddr, length: *mut u32) -> c_int {
-    let accepted = match decode_syscall(syscall1(Syscall::SocketAccept, socket as usize)) {
+    // SAFETY: SocketAccept takes only the listening descriptor.
+    let accepted = match decode_syscall(unsafe { syscall1(Syscall::SocketAccept, socket as usize) })
+    {
         Ok(accepted) => accepted,
         Err(error) => {
             set_errno(error);
@@ -713,7 +747,8 @@ unsafe extern "C" fn accept(socket: c_int, address: *mut SockAddr, length: *mut 
         let result = query_socket_address(accepted as c_int, true)
             .and_then(|wire| unsafe { write_sockaddr(address, length, &wire) });
         if let Err(error) = result {
-            let _ = syscall1(Syscall::HandleClose, accepted);
+            // SAFETY: This function owns the newly accepted descriptor being discarded.
+            let _ = unsafe { syscall1(Syscall::HandleClose, accepted) };
             set_errno(error);
             return -1;
         }
@@ -723,19 +758,18 @@ unsafe extern "C" fn accept(socket: c_int, address: *mut SockAddr, length: *mut 
 
 #[unsafe(no_mangle)]
 extern "C" fn shutdown(socket: c_int, how: c_int) -> c_int {
-    return_int(decode_syscall(syscall2(
-        Syscall::SocketShutdown,
-        socket as usize,
-        how as usize,
-    )))
+    // SAFETY: SocketShutdown takes only a descriptor and a shutdown mode.
+    return_int(decode_syscall(unsafe {
+        syscall2(Syscall::SocketShutdown, socket as usize, how as usize)
+    }))
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn close(socket: c_int) -> c_int {
-    return_int(decode_syscall(syscall1(
-        Syscall::HandleClose,
-        socket as usize,
-    )))
+    // SAFETY: The C caller releases its descriptor; no Rust Handle owns this C socket.
+    return_int(decode_syscall(unsafe {
+        syscall1(Syscall::HandleClose, socket as usize)
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -775,12 +809,15 @@ unsafe extern "C" fn send(
         set_errno(EINVAL);
         return -1;
     }
-    return_size(decode_syscall(syscall3(
-        Syscall::StreamWrite,
-        socket as usize,
-        buffer as usize,
-        length,
-    )))
+    // SAFETY: The C caller guarantees buffer is readable for length bytes.
+    return_size(decode_syscall(unsafe {
+        syscall3(
+            Syscall::StreamWrite,
+            socket as usize,
+            buffer as usize,
+            length,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -794,12 +831,15 @@ unsafe extern "C" fn recv(
         set_errno(if flags != 0 { EOPNOTSUPP } else { EINVAL });
         return -1;
     }
-    return_size(decode_syscall(syscall3(
-        Syscall::StreamRead,
-        socket as usize,
-        buffer as usize,
-        length,
-    )))
+    // SAFETY: The C caller guarantees buffer is writable for length bytes.
+    return_size(decode_syscall(unsafe {
+        syscall3(
+            Syscall::StreamRead,
+            socket as usize,
+            buffer as usize,
+            length,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -827,13 +867,16 @@ unsafe extern "C" fn sendto(
             return -1;
         }
     };
-    return_size(decode_syscall(syscall4(
-        Syscall::SocketSendTo,
-        socket as usize,
-        buffer as usize,
-        length,
-        address.as_ptr() as usize,
-    )))
+    // SAFETY: The caller supplies readable data; the initialized wire address stays alive.
+    return_size(decode_syscall(unsafe {
+        syscall4(
+            Syscall::SocketSendTo,
+            socket as usize,
+            buffer as usize,
+            length,
+            address.as_ptr() as usize,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
@@ -850,17 +893,20 @@ unsafe extern "C" fn recvfrom(
         return -1;
     }
     let mut wire = [0; 8];
-    let result = decode_syscall(syscall4(
-        Syscall::SocketRecvFrom,
-        socket as usize,
-        buffer as usize,
-        length,
-        if address.is_null() {
-            0
-        } else {
-            wire.as_mut_ptr() as usize
-        },
-    ));
+    // SAFETY: The caller supplies writable data storage; wire is a live eight-byte output.
+    let result = decode_syscall(unsafe {
+        syscall4(
+            Syscall::SocketRecvFrom,
+            socket as usize,
+            buffer as usize,
+            length,
+            if address.is_null() {
+                0
+            } else {
+                wire.as_mut_ptr() as usize
+            },
+        )
+    });
     let received = match result {
         Ok(received) => received,
         Err(error) => {
@@ -998,12 +1044,15 @@ unsafe extern "C" fn poll(descriptors: *mut PollFd, count: usize, timeout_ms: c_
         timeout_ns,
         min_timeout_ns: 0,
     };
-    return_int(decode_syscall(syscall3(
-        Syscall::Poll,
-        descriptors as usize,
-        count,
-        &options as *const PollOptions as usize,
-    )))
+    // SAFETY: The caller supplies count writable PollFd entries; options lives until return.
+    return_int(decode_syscall(unsafe {
+        syscall3(
+            Syscall::Poll,
+            descriptors as usize,
+            count,
+            &options as *const PollOptions as usize,
+        )
+    }))
 }
 
 #[unsafe(no_mangle)]
