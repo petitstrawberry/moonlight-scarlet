@@ -199,6 +199,14 @@ void* memset(void* destination, int value, size_t length) {
     return destination;
 }
 
+void explicit_bzero(void* destination, size_t length) {
+    /* Volatile stores keep secret erasure observable to the optimizer. */
+    volatile unsigned char* out = destination;
+    for (size_t index = 0; index < length; index++) {
+        out[index] = 0;
+    }
+}
+
 int memcmp(const void* left, const void* right, size_t length) {
     const unsigned char* a = left;
     const unsigned char* b = right;

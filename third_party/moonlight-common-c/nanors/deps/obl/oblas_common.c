@@ -36,7 +36,7 @@ void *obl_alloc(size_t num_rows, size_t row_size, size_t alignment)
         if (ptr) {
             memset(ptr, 0, total_size);
         }
-#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__) || defined(__posix__)
+#elif !defined(LC_SCARLET) && (defined(__APPLE__) || defined(__linux__) || defined(__unix__) || defined(__posix__))
         if (posix_memalign(&ptr, alignment, total_size) == 0) {
             memset(ptr, 0, total_size);
         } else {

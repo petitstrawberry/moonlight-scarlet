@@ -376,6 +376,12 @@ extern "C" fn scarlet_errno_location() -> *mut c_int {
 }
 
 #[unsafe(no_mangle)]
+extern "C" fn getpid() -> c_int {
+    // SAFETY: Getpid takes no arguments and does not access caller memory.
+    unsafe { syscall0(Syscall::Getpid) as c_int }
+}
+
+#[unsafe(no_mangle)]
 extern "C" fn scarlet_monotonic_time_ns() -> u64 {
     // SAFETY: MonotonicTime takes no arguments and does not access caller memory.
     unsafe { syscall0(Syscall::MonotonicTime) as u64 }
