@@ -920,8 +920,8 @@ name = "gpu-raw"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-abi 1.0.0",
- "scarlet-os 1.0.0",
+ "scarlet-abi",
+ "scarlet-os",
 ]
 
 [[package]]
@@ -1460,10 +1460,10 @@ dependencies = [
 [[package]]
 name = "mio"
 version = "1.2.3"
-source = "git+https://github.com/petitstrawberry/mio.git?branch=scarlet#2d8b4d4e6ca762c96db8487e7f917d6d36893e37"
+source = "git+https://github.com/petitstrawberry/mio.git?rev=2eaecdf13b4cdf525fae61e06a8ed57c671731cd#2eaecdf13b4cdf525fae61e06a8ed57c671731cd"
 dependencies = [
  "libc",
- "scarlet-os 0.16.0",
+ "scarlet-os",
  "socket2",
  "wasi",
  "windows-sys 0.61.2",
@@ -1478,7 +1478,7 @@ dependencies = [
  "moonlight-sys",
  "opus-head-sys",
  "sas-client",
- "scarlet-sys 1.0.0",
+ "scarlet-sys",
  "scarlet-ui",
  "scarlet-video-client",
 ]
@@ -1509,7 +1509,7 @@ name = "moonlight-sys"
 version = "0.1.0"
 dependencies = [
  "cc",
- "scarlet-sys 1.0.0",
+ "scarlet-sys",
  "tstrans-mbedtls-src",
 ]
 
@@ -2583,18 +2583,13 @@ version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
  "sas-protocol",
- "scarlet-os 1.0.0",
+ "scarlet-os",
 ]
 
 [[package]]
 name = "sas-protocol"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
-
-[[package]]
-name = "scarlet-abi"
-version = "0.16.0"
-source = "git+https://github.com/petitstrawberry/Scarlet?branch=dev#47adde417d51eb2528aee6d6e163fb754af7d3bc"
 
 [[package]]
 name = "scarlet-abi"
@@ -2608,21 +2603,12 @@ source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49d
 
 [[package]]
 name = "scarlet-os"
-version = "0.16.0"
-source = "git+https://github.com/petitstrawberry/Scarlet?branch=dev#47adde417d51eb2528aee6d6e163fb754af7d3bc"
-dependencies = [
- "scarlet-abi 0.16.0",
- "scarlet-sys 0.16.0",
-]
-
-[[package]]
-name = "scarlet-os"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-abi 1.0.0",
+ "scarlet-abi",
  "scarlet-rt",
- "scarlet-sys 1.0.0",
+ "scarlet-sys",
 ]
 
 [[package]]
@@ -2630,7 +2616,7 @@ name = "scarlet-rt"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-sys 1.0.0",
+ "scarlet-sys",
 ]
 
 [[package]]
@@ -2643,18 +2629,10 @@ dependencies = [
 
 [[package]]
 name = "scarlet-sys"
-version = "0.16.0"
-source = "git+https://github.com/petitstrawberry/Scarlet?branch=dev#47adde417d51eb2528aee6d6e163fb754af7d3bc"
-dependencies = [
- "scarlet-abi 0.16.0",
-]
-
-[[package]]
-name = "scarlet-sys"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-abi 1.0.0",
+ "scarlet-abi",
 ]
 
 [[package]]
@@ -2745,9 +2723,9 @@ name = "scarlet-video-client"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-abi 1.0.0",
+ "scarlet-abi",
  "scarlet-codecs",
- "scarlet-os 1.0.0",
+ "scarlet-os",
 ]
 
 [[package]]
@@ -2860,7 +2838,7 @@ dependencies = [
  "adreno-a6xx-layout",
  "adreno-a6xx-submit-wire",
  "gpu-raw",
- "scarlet-os 1.0.0",
+ "scarlet-os",
  "sgfx-codegen-adreno-a6xx",
  "sgfx-core",
 ]
@@ -2872,7 +2850,7 @@ source = "git+https://github.com/petitstrawberry/scarlet-project-switch?rev=fc56
 dependencies = [
  "gpu-raw",
  "maxwell-submit-wire",
- "scarlet-os 1.0.0",
+ "scarlet-os",
  "sgfx-codegen-maxwell",
  "sgfx-core",
 ]
@@ -2883,7 +2861,7 @@ version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/sgfx?rev=49fa00da35a6ea416c99207b49ba7aee480d6985#49fa00da35a6ea416c99207b49ba7aee480d6985"
 dependencies = [
  "gpu-raw",
- "scarlet-os 1.0.0",
+ "scarlet-os",
  "sgfx-codegen-virgl",
  "sgfx-core",
 ]
@@ -3054,10 +3032,10 @@ dependencies = [
 [[package]]
 name = "socket2"
 version = "0.6.5"
-source = "git+https://github.com/petitstrawberry/socket2.git?branch=scarlet#0788a51d0a612880af805e6b8838025e9d1964a2"
+source = "git+https://github.com/petitstrawberry/socket2.git?rev=15f0140af367c76befdab2606c7b643f29552bfd#15f0140af367c76befdab2606c7b643f29552bfd"
 dependencies = [
  "libc",
- "scarlet-os 0.16.0",
+ "scarlet-os",
  "windows-sys 0.61.2",
 ]
 
@@ -3179,7 +3157,7 @@ name = "sws-client"
 version = "1.0.0"
 source = "git+https://github.com/petitstrawberry/Scarlet?rev=b3d2a55740a3d2ca49daad0ec7baba233f706f7a#b3d2a55740a3d2ca49daad0ec7baba233f706f7a"
 dependencies = [
- "scarlet-os 1.0.0",
+ "scarlet-os",
  "sws-protocol",
 ]
 
@@ -3398,7 +3376,7 @@ dependencies = [
 [[package]]
 name = "tokio"
 version = "1.53.1"
-source = "git+https://github.com/petitstrawberry/tokio.git?branch=scarlet#393ab6e0be05406315ddc37995942d5dcecbec48"
+source = "git+https://github.com/petitstrawberry/tokio.git?rev=8610548b5826d9405a2c7bff6465aee01813be83#8610548b5826d9405a2c7bff6465aee01813be83"
 dependencies = [
  "bytes",
  "libc",
