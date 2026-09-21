@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Rust ownership and FFI boundary for moonlight-common-c"
 
 [target.'cfg(target_os = "scarlet")'.dependencies]
-scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", branch = "dev", package = "scarlet-sys" }
+scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a", package = "scarlet-sys" }
 
 [build-dependencies]
 cc = "1.2"
