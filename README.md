@@ -67,6 +67,17 @@ cargo build --release -p moonlight --target riscv64gc-unknown-scarlet
 cargo build --release -p moonlight --target aarch64-unknown-scarlet
 ```
 
+Keep the workspace's Scarlet and ScarletUI revisions aligned with the native
+runtime used by SGFX, `mio`, and `socket2` in `Cargo.lock`. Multiple Git sources
+for `scarlet-os` cause duplicate exported symbols at link time. After updating
+these dependencies, verify the runtime resolves to a single package and run a
+full target build (a `cargo check` cannot detect this link failure):
+
+```bash
+cargo tree --locked --target aarch64-unknown-scarlet -i scarlet-os
+cargo build --locked --release -p moonlight --target aarch64-unknown-scarlet
+```
+
 ## License
 
 Moonlight Scarlet is licensed under GPL-3.0-only because it links

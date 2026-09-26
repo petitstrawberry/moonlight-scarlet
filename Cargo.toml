@@ -11,11 +11,17 @@ repository = "https://github.com/petitstrawberry/moonlight-scarlet"
 [workspace.dependencies]
 moonlight-control = { path = "moonlight-control" }
 moonlight-sys = { path = "moonlight-sys" }
+# Keep the native runtime source identical to ScarletUI's SWS/SGFX dependencies.
+# Separate Git sources produce two scarlet-os copies with duplicate exported symbols.
+scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
+scarlet-video-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
+sas-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
+scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", rev = "a735bae0a8970b44cf6192a6851da5dc9cf47e1a", default-features = false }
 
 [patch.crates-io]
 ring = { git = "https://github.com/petitstrawberry/ring.git", branch = "scarlet" }
-socket2 = { git = "https://github.com/petitstrawberry/socket2.git", branch = "scarlet" }
-tokio = { git = "https://github.com/petitstrawberry/tokio.git", branch = "scarlet" }
+socket2 = { git = "https://github.com/petitstrawberry/socket2.git", rev = "15f0140af367c76befdab2606c7b643f29552bfd" }
+tokio = { git = "https://github.com/petitstrawberry/tokio.git", rev = "8610548b5826d9405a2c7bff6465aee01813be83" }
 
 [profile.dev]
 opt-level = 2
