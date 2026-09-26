@@ -13,6 +13,7 @@ use scarlet_ui::{
     WindowContext, hstack, vstack, zstack,
 };
 
+use crate::gamepad::RemoteGamepads;
 use crate::input::{RemoteInput, ShortcutDispatch, StreamShortcut};
 use crate::video::VideoOutput;
 
@@ -84,6 +85,8 @@ struct MoonlightApp {
     selected_license: State<usize>,
     video_output: VideoOutput,
     remote_input: RemoteInput,
+    remote_gamepads: RemoteGamepads,
+    gamepad_navigation_applied: Option<bool>,
     stream_input_focused: State<bool>,
     pointer_lock_desired: State<bool>,
     pointer_lock_applied: State<bool>,
@@ -115,6 +118,8 @@ impl MoonlightApp {
             stream_control: State::new(StateId::new(13), None),
             video_output: VideoOutput::new(),
             remote_input: RemoteInput::default(),
+            remote_gamepads: RemoteGamepads::default(),
+            gamepad_navigation_applied: None,
             stream_input_focused: State::new(StateId::new(14), false),
             pointer_lock_desired: State::new(StateId::new(15), false),
             pointer_lock_applied: State::new(StateId::new(16), false),
@@ -263,6 +268,7 @@ impl MoonlightApp {
         self.session_details.set(String::new());
         self.video_output.reset();
         self.remote_input.reset();
+        self.remote_gamepads.reset_session();
         self.stream_input_focused.set(false);
         self.pointer_lock_desired.set(false);
 
@@ -276,10 +282,13 @@ impl MoonlightApp {
         let video_output = self.video_output.clone();
         let stream_ui = self.clone();
         let window_title = self.window_title.clone();
+        let launch_config = LaunchConfig {
+            gamepad_mask: u32::from(self.remote_gamepads.active_mask()),
+            ..LaunchConfig::default()
+        };
         thread::spawn(move || {
-            let result = GameStreamClient::load_default().and_then(|client| {
-                client.start_session(&connected, &application, LaunchConfig::default())
-            });
+            let result = GameStreamClient::load_default()
+                .and_then(|client| client.start_session(&connected, &application, launch_config));
 
             match result {
                 Ok(session) => {
@@ -455,17 +464,17 @@ impl MoonlightApp {
             return;
         }
         self.pointer_lock_desired.set(true);
-        self.status.set(String::from("Requesting input capture…"));
+        self.status.set(String::from("Requesting mouse capture…"));
     }
 
     fn release_pointer_lock(&self) {
         let control = self.stream_control.get();
-        if let Err(error) = self.remote_input.release_all(control.as_ref()) {
+        if let Err(error) = self.remote_input.release_mouse(control.as_ref()) {
             report_input_error(error);
         }
         self.pointer_lock_desired.set(false);
         self.status.set(String::from(
-            "Input released · Ctrl+Alt+Shift+Z to capture again",
+            "Mouse released · Ctrl+Alt+Shift+Z to capture again",
         ));
     }
 
@@ -483,6 +492,9 @@ impl MoonlightApp {
 
     fn leave_stream_mode(&self) {
         let control = self.stream_control.get();
+        if let Err(error) = self.remote_gamepads.release_all(control.as_ref()) {
+            report_input_error(error);
+        }
         if let Err(error) = self.remote_input.release_all(control.as_ref()) {
             report_input_error(error);
         }
@@ -493,6 +505,7 @@ impl MoonlightApp {
 
     fn reset_stream_window_state(&self) {
         self.remote_input.reset();
+        self.remote_gamepads.reset_session();
         self.pointer_lock_desired.set(false);
         self.fullscreen_desired.set(false);
         self.stream_input_focused.set(false);
@@ -515,13 +528,31 @@ impl MoonlightApp {
             ShortcutDispatch::Consumed => return true,
             ShortcutDispatch::NotShortcut => {}
         }
-        if !self.pointer_lock_applied.get() {
-            return false;
-        }
         let Some(control) = self.stream_control.get() else {
             return false;
         };
         match self.remote_input.send_key(&control, event) {
+            Ok(handled) => handled,
+            Err(error) => {
+                report_input_error(error);
+                true
+            }
+        }
+    }
+
+    fn handle_stream_touch(
+        &self,
+        change: scarlet_ui::event::TouchChange,
+        viewport: (u32, u32),
+        video: (u32, u32),
+    ) -> bool {
+        let Some(control) = self.stream_control.get() else {
+            return false;
+        };
+        match self
+            .remote_input
+            .send_touch(&control, change, viewport, video)
+        {
             Ok(handled) => handled,
             Err(error) => {
                 report_input_error(error);
@@ -1018,6 +1049,7 @@ impl MoonlightApp {
         let pointer_input = self.clone();
         let button_input = self.clone();
         let wheel_input = self.clone();
+        let touch_input = self.clone();
         let pointer_locked = self.pointer_lock_applied.get();
         let fullscreen_enabled = self.fullscreen_desired.get();
         let overlay = if pointer_locked {
@@ -1030,11 +1062,11 @@ impl MoonlightApp {
                         .header_style()
                         .on_click(move || disconnect.stop_stream()),
                     Text::new(title).font_size(16.0).color(TEXT_COLOR),
-                    Text::new("Ctrl+Alt+Shift+Z · Release input")
+                    Text::new("Ctrl+Alt+Shift+Z · Toggle mouse capture")
                         .font_size(11.0)
                         .color(MUTED_TEXT_COLOR),
                     Spacer::new(),
-                    Button::new("Capture Input")
+                    Button::new("Capture Mouse")
                         .header_style()
                         .text_color(TEXT_COLOR)
                         .font_size(12.0)
@@ -1066,7 +1098,10 @@ impl MoonlightApp {
         let video = self
             .video_output
             .view()
-            .on_event(move |event| wheel_input.handle_stream_event(event));
+            .on_event(move |event| wheel_input.handle_stream_event(event))
+            .on_touch(move |change, viewport, video| {
+                touch_input.handle_stream_touch(change, viewport, video)
+            });
 
         zstack! {
             Rectangle::new()
@@ -1288,7 +1323,37 @@ fn build_connection_heading(heading: &ConnectionHeading) -> Box<dyn View> {
 }
 
 impl Application for MoonlightApp {
+    fn on_gamepad(&mut self, _ctx: &WindowContext, event: GamepadEvent) {
+        self.remote_gamepads.observe(event);
+        if self.selected_page.get() == STREAM_PAGE
+            && self.gamepad_navigation_applied == Some(false)
+            && let Some(control) = self.stream_control.get()
+            && let Err(error) = self.remote_gamepads.sync(&control)
+        {
+            report_input_error(error);
+        }
+    }
+
     fn on_window_sync(&mut self, _ctx: &WindowContext, window: &mut dyn PlatformWindow) {
+        let streaming =
+            self.selected_page.get() == STREAM_PAGE && self.stream_control.get().is_some();
+        let navigation = !streaming;
+        if self.gamepad_navigation_applied != Some(navigation) {
+            match window.set_gamepad_input(true, navigation) {
+                Ok(()) => self.gamepad_navigation_applied = Some(navigation),
+                Err(error) => eprintln!("moonlight: failed to configure gamepad input: {error}"),
+            }
+        }
+        // Replay devices observed in menus when streaming starts, and retry
+        // failed packets. Unchanged snapshots do not enqueue network traffic.
+        if streaming
+            && self.gamepad_navigation_applied == Some(false)
+            && let Some(control) = self.stream_control.get()
+            && let Err(error) = self.remote_gamepads.sync(&control)
+        {
+            report_input_error(error);
+        }
+
         let window_title = self.window_title.get();
         if window_title != self.applied_window_title {
             window.set_title(&window_title);
@@ -1305,7 +1370,7 @@ impl Application for MoonlightApp {
                 self.pointer_lock_desired
                     .set(self.pointer_lock_applied.get());
                 self.status
-                    .set(String::from("Input capture is unavailable for this window"));
+                    .set(String::from("Mouse capture is unavailable for this window"));
             }
         }
 
@@ -1327,15 +1392,15 @@ impl Application for MoonlightApp {
         self.pointer_lock_desired.set(locked);
         if locked {
             self.status
-                .set(String::from("Input captured · Ctrl+Alt+Shift+Z to release"));
+                .set(String::from("Mouse captured · Ctrl+Alt+Shift+Z to release"));
         } else {
             let control = self.stream_control.get();
-            if let Err(error) = self.remote_input.release_all(control.as_ref()) {
+            if let Err(error) = self.remote_input.release_mouse(control.as_ref()) {
                 report_input_error(error);
             }
             if self.selected_page.get() == STREAM_PAGE {
                 self.status.set(String::from(
-                    "Input released · click video or press Ctrl+Alt+Shift+Z",
+                    "Mouse released · click video or press Ctrl+Alt+Shift+Z",
                 ));
             }
         }
@@ -1358,6 +1423,9 @@ impl Application for MoonlightApp {
 
     fn on_focus_changed(&mut self, _window_id: u32, _app_name: &str, _menu_titles: &str) {
         let control = self.stream_control.get();
+        if let Err(error) = self.remote_gamepads.release_all(control.as_ref()) {
+            report_input_error(error);
+        }
         if let Err(error) = self.remote_input.release_all(control.as_ref()) {
             report_input_error(error);
         }
@@ -1610,7 +1678,7 @@ fn placeholder_color(index: usize) -> Color {
 
 #[cfg(target_os = "scarlet")]
 fn platform_video_summary() -> &'static str {
-    "Scarlet hardware decode · BGRA presentation"
+    "Scarlet hardware decode · NV12 presentation"
 }
 
 #[cfg(not(target_os = "scarlet"))]
@@ -1638,6 +1706,22 @@ mod tests {
             phase: WheelPhase::Moved,
             source: ScrollSource::Wheel,
         }))
+    }
+
+    #[test]
+    fn releasing_mouse_does_not_disconnect_gamepads() {
+        let app = MoonlightApp::new();
+        app.remote_gamepads.observe(GamepadEvent {
+            device_id: 42,
+            buttons: 1,
+            ..GamepadEvent::default()
+        });
+        app.pointer_lock_desired.set(true);
+        app.release_pointer_lock();
+        assert!(!app.pointer_lock_desired.get());
+        assert_eq!(app.remote_gamepads.active_mask(), 1);
+        app.leave_stream_mode();
+        assert_eq!(app.remote_gamepads.active_mask(), 0);
     }
 
     #[test]

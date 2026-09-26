@@ -79,6 +79,18 @@ unsafe extern "C" {
     fn mls_video_width_value() -> c_int;
     fn mls_video_height_value() -> c_int;
     fn mls_video_fps_value() -> c_int;
+    fn LiGetHostFeatureFlags() -> u32;
+    fn LiSendTouchEvent(
+        event_type: u8,
+        pointer_id: u32,
+        x: f32,
+        y: f32,
+        pressure: f32,
+        major: f32,
+        minor: f32,
+        rotation: u16,
+    ) -> c_int;
+    fn LiSendMousePositionEvent(x: c_short, y: c_short, width: c_short, height: c_short) -> c_int;
     fn LiSendMouseMoveEvent(delta_x: c_short, delta_y: c_short) -> c_int;
     fn LiSendMouseButtonEvent(action: c_char, button: c_int) -> c_int;
     fn LiSendKeyboardEvent2(
@@ -89,6 +101,24 @@ unsafe extern "C" {
     ) -> c_int;
     fn LiSendHighResScrollEvent(scroll_amount: c_short) -> c_int;
     fn LiSendHighResHScrollEvent(scroll_amount: c_short) -> c_int;
+    fn LiSendMultiControllerEvent(
+        controller_number: c_short,
+        active_gamepad_mask: c_short,
+        button_flags: c_int,
+        left_trigger: u8,
+        right_trigger: u8,
+        left_x: c_short,
+        left_y: c_short,
+        right_x: c_short,
+        right_y: c_short,
+    ) -> c_int;
+    fn LiSendControllerArrivalEvent(
+        controller_number: u8,
+        active_gamepad_mask: u16,
+        controller_type: u8,
+        supported_buttons: u32,
+        capabilities: u16,
+    ) -> c_int;
 }
 
 /// Host fields required by `moonlight-common-c` after launch or resume.
@@ -406,9 +436,60 @@ impl KeyboardModifiers {
     }
 }
 
+/// Native touchscreen contact transition understood by Sunshine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TouchEventType {
+    Down = 1,
+    Up = 2,
+    Move = 3,
+    Cancel = 4,
+    CancelAll = 7,
+}
+
+/// Standard Xbox-layout buttons from `Limelight.h`.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerButton {
+    Up = 0x0001,
+    Down = 0x0002,
+    Left = 0x0004,
+    Right = 0x0008,
+    Start = 0x0010,
+    Back = 0x0020,
+    LeftStick = 0x0040,
+    RightStick = 0x0080,
+    LeftShoulder = 0x0100,
+    RightShoulder = 0x0200,
+    Home = 0x0400,
+    A = 0x1000,
+    B = 0x2000,
+    X = 0x4000,
+    Y = 0x8000,
+}
+
+/// Complete controller snapshot; sticks use signed 16-bit coordinates, Y up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ControllerState {
+    /// Bitmap composed from [`ControllerButton`] values.
+    pub buttons: u32,
+    /// Analog trigger pressure from 0 (released) to 255.
+    pub left_trigger: u8,
+    /// Analog trigger pressure from 0 (released) to 255.
+    pub right_trigger: u8,
+    pub left_x: i16,
+    pub left_y: i16,
+    pub right_x: i16,
+    pub right_y: i16,
+}
+
 /// Error returned when remote input cannot be queued.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputError {
+    /// Touch coordinates must be finite and normalized to 0..=1.
+    InvalidCoordinates,
+    /// Controller numbers must be in the protocol range 0..16.
+    InvalidController(u8),
     /// The connection has already stopped or is not ready for input.
     ConnectionInactive,
     /// `moonlight-common-c` rejected or could not allocate an input packet.
@@ -423,6 +504,10 @@ pub enum InputError {
 impl fmt::Display for InputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidCoordinates => formatter.write_str("invalid normalized input coordinates"),
+            Self::InvalidController(number) => {
+                write!(formatter, "invalid controller number {number}")
+            }
             Self::ConnectionInactive => formatter.write_str("stream input is not active"),
             Self::Core { operation, code } => {
                 write!(formatter, "{operation} input failed with {code}")
@@ -457,6 +542,57 @@ impl ConnectionControl {
     /// `true` after [`ConnectionControl::request_stop`] is called.
     pub fn stop_requested(&self) -> bool {
         self.state.stop_requested.load(Ordering::Acquire)
+    }
+
+    /// Whether the active host accepts native touchscreen contacts.
+    pub fn supports_touch(&self) -> Result<bool, InputError> {
+        let _guard = lock_core_connection();
+        if !self.state.active.load(Ordering::Acquire) {
+            return Err(InputError::ConnectionInactive);
+        }
+        // SAFETY: host feature flags belong to the active, serialized connection.
+        Ok(unsafe { LiGetHostFeatureFlags() } & 0x01 != 0)
+    }
+
+    /// Send a native contact using coordinates normalized to the video rectangle.
+    /// Pressure/contact area are not calibrated by SWS, so only contact state is sent.
+    pub fn send_touch(
+        &self,
+        event: TouchEventType,
+        id: u32,
+        x: f32,
+        y: f32,
+    ) -> Result<(), InputError> {
+        if !valid_position(x, y) {
+            return Err(InputError::InvalidCoordinates);
+        }
+        self.send_input("touch", || {
+            let pressure = if matches!(event, TouchEventType::Down | TouchEventType::Move) {
+                1.0
+            } else {
+                0.0
+            };
+            // SAFETY: all scalar arguments match Limelight.h; the core is active.
+            unsafe { LiSendTouchEvent(event as u8, id, x, y, pressure, 0.0, 0.0, 0xffff) }
+        })
+    }
+
+    /// Send an absolute pointer position as a fallback for hosts without touch.
+    pub fn send_mouse_position(&self, x: f32, y: f32) -> Result<(), InputError> {
+        if !valid_position(x, y) {
+            return Err(InputError::InvalidCoordinates);
+        }
+        self.send_input("mouse position", || {
+            // SAFETY: normalized coordinates fit within the positive i16 reference extent.
+            unsafe {
+                LiSendMousePositionEvent(
+                    (x * 32767.0).round() as i16,
+                    (y * 32767.0).round() as i16,
+                    32767,
+                    32767,
+                )
+            }
+        })
     }
 
     /// Queue relative mouse movement for the host.
@@ -568,6 +704,50 @@ impl ConnectionControl {
         })
     }
 
+    /// Announce an Xbox-layout controller with analog triggers and no feedback
+    /// capabilities. `active_mask` includes this controller's bit. Sunshine
+    /// supports slots 0..16; GFE hosts only support slots 0..4.
+    pub fn send_controller_arrival(&self, number: u8, active_mask: u16) -> Result<(), InputError> {
+        if number >= 16 {
+            return Err(InputError::InvalidController(number));
+        }
+        self.send_input("controller arrival", || {
+            // SAFETY: scalar types match Limelight.h; 1 is Xbox type and the
+            // analog-trigger capability. Only standard buttons are advertised.
+            unsafe { LiSendControllerArrivalEvent(number, active_mask, 1, 0xF7FF, 1) }
+        })
+    }
+
+    /// Queue a complete snapshot. To remove a controller, clear its bit in
+    /// `active_mask` and send the default (neutral) state.
+    pub fn send_controller(
+        &self,
+        number: u8,
+        active_mask: u16,
+        state: ControllerState,
+    ) -> Result<(), InputError> {
+        if number >= 16 {
+            return Err(InputError::InvalidController(number));
+        }
+        self.send_input("controller", || {
+            // SAFETY: the active core owns the queue; scalar widths match the
+            // C signature. The mask cast preserves all 16 protocol bits.
+            unsafe {
+                LiSendMultiControllerEvent(
+                    i16::from(number),
+                    active_mask as i16,
+                    state.buttons as c_int,
+                    state.left_trigger,
+                    state.right_trigger,
+                    state.left_x,
+                    state.left_y,
+                    state.right_x,
+                    state.right_y,
+                )
+            }
+        })
+    }
+
     fn send_input(
         &self,
         operation: &'static str,
@@ -587,6 +767,10 @@ impl ConnectionControl {
             })
         }
     }
+}
+
+fn valid_position(x: f32, y: f32) -> bool {
+    x.is_finite() && y.is_finite() && (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y)
 }
 
 /// Negotiated video parameters reported by the core's renderer setup callback.
@@ -1030,12 +1214,14 @@ fn lock_core_connection() -> MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
+    use super::TouchEventType;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
     use super::{
-        ConnectionControl, ConnectionState, HostConnectionInfo, HostStrings, InputAction,
-        InputError, KeyboardModifiers, MouseButton, StreamConfiguration, wire_key_code,
+        ConnectionControl, ConnectionState, ControllerState, HostConnectionInfo, HostStrings,
+        InputAction, InputError, KeyboardModifiers, MouseButton, StreamConfiguration,
+        wire_key_code,
     };
 
     #[test]
@@ -1102,6 +1288,26 @@ mod tests {
         };
 
         assert_eq!(
+            control.supports_touch(),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_touch(TouchEventType::Down, 1, 0.5, 0.5),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_mouse_position(0.5, 0.5),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_touch(TouchEventType::Down, 1, f32::NAN, 0.5),
+            Err(InputError::InvalidCoordinates)
+        );
+        assert_eq!(
+            control.send_mouse_position(1.1, 0.5),
+            Err(InputError::InvalidCoordinates)
+        );
+        assert_eq!(
             control.send_mouse_move(4, -3),
             Err(InputError::ConnectionInactive)
         );
@@ -1112,6 +1318,22 @@ mod tests {
         assert_eq!(
             control.send_keyboard(0x41, InputAction::Press, KeyboardModifiers::default(),),
             Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller_arrival(15, 0x8000),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller(15, 0x8000, ControllerState::default()),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller_arrival(16, 1),
+            Err(InputError::InvalidController(16))
+        );
+        assert_eq!(
+            control.send_controller(255, 1, ControllerState::default()),
+            Err(InputError::InvalidController(255))
         );
     }
 }

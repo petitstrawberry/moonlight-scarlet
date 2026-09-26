@@ -1,14 +1,14 @@
 //! Moonlight Scarlet application entry point.
 
-#![cfg_attr(target_os = "scarlet", feature(portable_simd))]
-
 #[cfg(target_os = "scarlet")]
 use std::num::NonZeroU32;
 
 mod audio;
+mod gamepad;
 mod input;
 mod licenses;
 mod stream;
+mod touch;
 mod ui;
 mod video;
 

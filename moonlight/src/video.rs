@@ -7,45 +7,39 @@ use scarlet_ui::{Color, Text, ViewExt};
 use scarlet_ui::{ComponentElement, Element, Event, View};
 
 type VideoEventHandler = Rc<dyn Fn(&Event) -> bool>;
+type VideoTouchHandler = Rc<dyn Fn(scarlet_ui::event::TouchChange, (u32, u32), (u32, u32)) -> bool>;
 
 #[cfg(target_os = "scarlet")]
 mod platform {
-    use super::VideoEventHandler;
+    use super::{VideoEventHandler, VideoTouchHandler, fit_size};
+    use scarlet_os::handle::Handle;
+    use std::any::Any;
     use std::collections::BTreeMap;
-    use std::mem;
-    use std::rc::Rc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    use core::simd::Simd;
-    use core::simd::cmp::SimdOrd;
-    use core::simd::num::{SimdInt, SimdUint};
-    use scarlet_ui::{CanvasView, InvalidationKind, Listenable, SubscriptionId, View, ViewExt};
+    use scarlet_ui::element::UpdateResult;
+    use scarlet_ui::renderer::PaintContext;
+    use scarlet_ui::{
+        ChromaLocation, Color, Element, ElementRenderObject, Event, InvalidationKind,
+        LayoutConstraints, Listenable, Point, Rect, RenderElement, SgfxTexture, Size,
+        SubscriptionId, View, ViewExt, YcbcrConversion, YcbcrMatrix, YcbcrRange,
+    };
+    use scarlet_video_client::{DecodedImage, shared_image::*};
 
     #[derive(Clone)]
     pub(super) struct PlatformVideoOutput {
-        frames: Arc<Mutex<FrameData>>,
+        // A single latest-frame slot bounds latency and releases superseded
+        // leases. Render objects and GPU paint commands retain their own lease.
+        frames: Arc<Mutex<Option<Arc<SharedFrame>>>>,
         paint_signal: Arc<PaintSignal>,
     }
 
-    struct FrameData {
-        pixels: Vec<u8>,
-        spare_pixels: Vec<u8>,
+    struct SharedFrame {
+        handle: Handle,
         width: u32,
         height: u32,
-        timestamp_us: u64,
-    }
-
-    impl FrameData {
-        fn new() -> Self {
-            Self {
-                pixels: Vec::new(),
-                spare_pixels: Vec::new(),
-                width: 0,
-                height: 0,
-                timestamp_us: 0,
-            }
-        }
+        conversion: YcbcrConversion,
     }
 
     struct PaintSignal {
@@ -60,26 +54,22 @@ mod platform {
                 subscribers: Mutex::new(BTreeMap::new()),
             }
         }
-
         fn notify(&self) {
-            let subscribers = lock(&self.subscribers);
-            for callback in subscribers.values() {
+            let callbacks: Vec<_> = lock(&self.subscribers).values().cloned().collect();
+            for callback in callbacks {
                 callback();
             }
         }
     }
-
     impl Listenable for PaintSignal {
         fn subscribe_any(&self, callback: Arc<dyn Fn() + Send + Sync>) -> SubscriptionId {
             let id = SubscriptionId::new(self.next_subscription.fetch_add(1, Ordering::Relaxed));
             lock(&self.subscribers).insert(id, callback);
             id
         }
-
         fn unsubscribe(&self, id: SubscriptionId) -> bool {
             lock(&self.subscribers).remove(&id).is_some()
         }
-
         fn invalidation_kind(&self) -> InvalidationKind {
             InvalidationKind::Paint
         }
@@ -88,87 +78,77 @@ mod platform {
     impl PlatformVideoOutput {
         pub(super) fn new() -> Self {
             Self {
-                frames: Arc::new(Mutex::new(FrameData::new())),
+                frames: Arc::new(Mutex::new(None)),
                 paint_signal: Arc::new(PaintSignal::new()),
             }
         }
-
         pub(super) fn reset(&self) {
-            let mut frame = lock(&self.frames);
-            frame.pixels.clear();
-            frame.width = 0;
-            frame.height = 0;
-            frame.timestamp_us = 0;
-            drop(frame);
+            *lock(&self.frames) = None;
             self.paint_signal.notify();
         }
-
-        pub(super) fn present_nv12(
-            &self,
-            width: u32,
-            height: u32,
-            timestamp_us: u64,
-            nv12: &[u8],
-        ) -> Result<(), String> {
-            if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
-                return Err(format!("unsupported NV12 dimensions: {width}x{height}"));
-            }
-            let width_usize = width as usize;
-            let height_usize = height as usize;
-            let y_len = width_usize
-                .checked_mul(height_usize)
-                .ok_or_else(|| String::from("decoded frame dimensions overflow"))?;
-            let uv_len = width_usize
-                .checked_mul(height_usize.div_ceil(2))
-                .ok_or_else(|| String::from("decoded chroma dimensions overflow"))?;
-            let nv12_len = y_len
-                .checked_add(uv_len)
-                .ok_or_else(|| String::from("decoded frame size overflows"))?;
-            if nv12.len() < nv12_len {
-                return Err(format!(
-                    "invalid decoded NV12 frame: {width}x{height}, {} bytes",
-                    nv12.len()
+        pub(super) fn present_image(&self, frame: DecodedImage) -> Result<(), String> {
+            let descriptor = frame.descriptor();
+            let color = frame.color();
+            let matrix = match color.matrix {
+                COLOR_MATRIX_BT601 => YcbcrMatrix::Bt601,
+                // The Moonlight session explicitly requests Rec. 709 limited.
+                COLOR_UNSPECIFIED | COLOR_MATRIX_BT709 => YcbcrMatrix::Bt709,
+                _ => return Err(String::from("unsupported shared video color matrix")),
+            };
+            if !matches!(color.primaries, 0 | 1 | 5 | 6)
+                || !matches!(color.transfer, 0 | 1 | 6 | 13)
+                || color.range > COLOR_RANGE_FULL
+                || color.chroma_x > CHROMA_MIDPOINT
+                || color.chroma_y > CHROMA_MIDPOINT
+            {
+                return Err(String::from(
+                    "unsupported shared video color space/chroma location",
                 ));
             }
-
-            let pixel_len = y_len
-                .checked_mul(4)
-                .ok_or_else(|| String::from("BGRA frame size overflows"))?;
-            let mut pixels = {
-                let mut frame = lock(&self.frames);
-                mem::take(&mut frame.spare_pixels)
+            let (width, height) = (descriptor.visible.width, descriptor.visible.height);
+            if width == 0 || height == 0 {
+                return Err(String::from("empty shared video image"));
+            }
+            let conversion = YcbcrConversion {
+                matrix,
+                range: if color.range == COLOR_RANGE_FULL {
+                    YcbcrRange::Full
+                } else {
+                    YcbcrRange::Limited
+                },
+                chroma_x: if color.chroma_x == CHROMA_MIDPOINT {
+                    ChromaLocation::Midpoint
+                } else {
+                    ChromaLocation::Cosited
+                },
+                chroma_y: if color.chroma_y == CHROMA_COSITED {
+                    ChromaLocation::Cosited
+                } else {
+                    ChromaLocation::Midpoint
+                },
             };
-            pixels.resize(pixel_len, 0);
-            nv12_to_bgra(width, height, &nv12[..nv12_len], &mut pixels);
-
-            let mut frame = lock(&self.frames);
-            let previous = mem::replace(&mut frame.pixels, pixels);
-            frame.spare_pixels = previous;
-            frame.width = width;
-            frame.height = height;
-            frame.timestamp_us = timestamp_us;
-            drop(frame);
+            *lock(&self.frames) = Some(Arc::new(SharedFrame {
+                handle: frame.into_handle(),
+                width,
+                height,
+                conversion,
+            }));
             self.paint_signal.notify();
             Ok(())
         }
-
         pub(super) fn listenable(&self) -> &dyn Listenable {
             self.paint_signal.as_ref()
         }
-
-        pub(super) fn canvas(
+        pub(super) fn view(
             &self,
             event_handler: Option<VideoEventHandler>,
+            touch_handler: Option<VideoTouchHandler>,
         ) -> impl View + Clone + use<> {
-            let frames = self.frames.clone();
-            CanvasView::new(
-                1280.0,
-                720.0,
-                Rc::new(move |buffer, width, height| {
-                    draw_video_frame(buffer, width, height, &frames);
-                }),
-            )
-            .on_event(move |event| event_handler.as_ref().is_some_and(|handler| handler(event)))
+            SharedVideoView {
+                output: self.clone(),
+                event_handler,
+                touch_handler,
+            }
             .frame(f32::INFINITY, f32::INFINITY)
         }
     }
@@ -179,204 +159,169 @@ mod platform {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn draw_video_frame(
-        destination: &mut [u8],
-        destination_width: u32,
-        destination_height: u32,
-        frames: &Mutex<FrameData>,
-    ) {
-        fill_bgra(destination, [0, 0, 0, 255]);
-        if destination_width == 0 || destination_height == 0 {
-            return;
+    #[derive(Clone)]
+    struct SharedVideoView {
+        output: PlatformVideoOutput,
+        event_handler: Option<VideoEventHandler>,
+        touch_handler: Option<VideoTouchHandler>,
+    }
+    impl View for SharedVideoView {
+        fn create_element(&self) -> Box<dyn Element> {
+            Box::new(RenderElement::new(
+                self.clone(),
+                SharedVideoRender {
+                    view: self.clone(),
+                    size: Size::new(1280.0, 720.0),
+                    source: None,
+                    image: None,
+                },
+            ))
         }
-
-        let frame = lock(frames);
-        if frame.width == 0 || frame.height == 0 || frame.pixels.is_empty() {
-            return;
+        fn as_any(&self) -> &dyn Any {
+            self
         }
-
-        let (draw_width, draw_height) = fit_size(
-            frame.width,
-            frame.height,
-            destination_width,
-            destination_height,
-        );
-        let x_offset = (destination_width - draw_width) / 2;
-        let y_offset = (destination_height - draw_height) / 2;
-        let destination_stride = destination_width as usize * 4;
-        let source_stride = frame.width as usize * 4;
-
-        if draw_width == frame.width && draw_height == frame.height {
-            for row in 0..draw_height as usize {
-                let source_start = row * source_stride;
-                let destination_start =
-                    (row + y_offset as usize) * destination_stride + x_offset as usize * 4;
-                let row_len = draw_width as usize * 4;
-                destination[destination_start..destination_start + row_len]
-                    .copy_from_slice(&frame.pixels[source_start..source_start + row_len]);
+    }
+    struct SharedVideoRender {
+        view: SharedVideoView,
+        size: Size,
+        source: Option<Arc<SharedFrame>>,
+        // SGFX textures stay on the UI thread; only native handles cross threads.
+        image: Option<Arc<SgfxTexture>>,
+    }
+    impl ElementRenderObject for SharedVideoRender {
+        fn layout(&mut self, constraints: LayoutConstraints) -> Size {
+            let width = if constraints.max_width.is_finite() {
+                constraints.max_width
+            } else {
+                1280.0
+            };
+            let height = if constraints.max_height.is_finite() {
+                constraints.max_height
+            } else {
+                720.0
+            };
+            self.size = Size::new(
+                width.max(constraints.min_width),
+                height.max(constraints.min_height),
+            );
+            self.size
+        }
+        fn size(&self) -> Size {
+            self.size
+        }
+        fn handle_event(&mut self, event: &Event, phase: scarlet_ui::event::Phase) -> bool {
+            if phase != scarlet_ui::event::Phase::Target {
+                return false;
             }
-            return;
-        }
-
-        for destination_y in 0..draw_height {
-            let source_y = (u64::from(destination_y) * u64::from(frame.height)
-                / u64::from(draw_height)) as usize;
-            let destination_row =
-                (destination_y + y_offset) as usize * destination_stride + x_offset as usize * 4;
-            let source_row = source_y * source_stride;
-            for destination_x in 0..draw_width {
-                let source_x = (u64::from(destination_x) * u64::from(frame.width)
-                    / u64::from(draw_width)) as usize;
-                let source_offset = source_row + source_x * 4;
-                let destination_offset = destination_row + destination_x as usize * 4;
-                destination[destination_offset..destination_offset + 4]
-                    .copy_from_slice(&frame.pixels[source_offset..source_offset + 4]);
+            if let Event::Touch(change) = event {
+                if let (Some(handler), Some(image)) = (&self.view.touch_handler, &self.image) {
+                    return handler(
+                        *change,
+                        (self.size.width as u32, self.size.height as u32),
+                        (image.width(), image.height()),
+                    );
+                }
             }
+            self.view
+                .event_handler
+                .as_ref()
+                .is_some_and(|handler| handler(event))
         }
-    }
-
-    fn fit_size(
-        source_width: u32,
-        source_height: u32,
-        destination_width: u32,
-        destination_height: u32,
-    ) -> (u32, u32) {
-        let width_limited = u64::from(destination_width) * u64::from(source_height)
-            <= u64::from(destination_height) * u64::from(source_width);
-        if width_limited {
-            let height = (u64::from(destination_width) * u64::from(source_height)
-                / u64::from(source_width)) as u32;
-            (destination_width, height.max(1))
-        } else {
-            let width = (u64::from(destination_height) * u64::from(source_width)
-                / u64::from(source_height)) as u32;
-            (width.max(1), destination_height)
-        }
-    }
-
-    fn fill_bgra(destination: &mut [u8], color: [u8; 4]) {
-        for pixel in destination.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&color);
-        }
-    }
-
-    fn nv12_to_bgra(width: u32, height: u32, nv12: &[u8], pixels: &mut [u8]) {
-        const LANES: usize = 8;
-
-        let width = width as usize;
-        let height = height as usize;
-        let y_plane_len = width * height;
-        let uv_plane = &nv12[y_plane_len..];
-
-        for y in 0..height {
-            let y_row = y * width;
-            let uv_row = (y / 2) * width;
-            let mut x = 0usize;
-
-            while x + LANES <= width {
-                let y_values = Simd::<u8, LANES>::from_slice(&nv12[y_row + x..y_row + x + LANES])
-                    .cast::<i32>();
-                let uv_base = uv_row + (x & !1);
-                let u_values = Simd::<i32, LANES>::from_array([
-                    uv_plane[uv_base] as i32,
-                    uv_plane[uv_base] as i32,
-                    uv_plane[uv_base + 2] as i32,
-                    uv_plane[uv_base + 2] as i32,
-                    uv_plane[uv_base + 4] as i32,
-                    uv_plane[uv_base + 4] as i32,
-                    uv_plane[uv_base + 6] as i32,
-                    uv_plane[uv_base + 6] as i32,
-                ]);
-                let v_values = Simd::<i32, LANES>::from_array([
-                    uv_plane[uv_base + 1] as i32,
-                    uv_plane[uv_base + 1] as i32,
-                    uv_plane[uv_base + 3] as i32,
-                    uv_plane[uv_base + 3] as i32,
-                    uv_plane[uv_base + 5] as i32,
-                    uv_plane[uv_base + 5] as i32,
-                    uv_plane[uv_base + 7] as i32,
-                    uv_plane[uv_base + 7] as i32,
-                ]);
-
-                let (red, green, blue) = yuv_to_rgb_simd(y_values, u_values, v_values);
-                store_bgra8(pixels, (y_row + x) * 4, red, green, blue);
-                x += LANES;
+        fn render(&mut self) {
+            let source = lock(&self.view.output.frames).clone();
+            let unchanged = match (&self.source, &source) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if unchanged {
+                return;
             }
-
-            while x < width {
-                let y_value = nv12[y_row + x] as i32;
-                let uv_offset = uv_row + (x & !1);
-                let u_value = uv_plane[uv_offset] as i32;
-                let v_value = uv_plane[uv_offset + 1] as i32;
-                let (red, green, blue) = yuv_to_rgb(y_value, u_value, v_value);
-                let offset = (y_row + x) * 4;
-                pixels[offset] = blue;
-                pixels[offset + 1] = green;
-                pixels[offset + 2] = red;
-                pixels[offset + 3] = 255;
-                x += 1;
+            self.image = source.as_ref().and_then(|frame| {
+                let result = frame
+                    .handle
+                    .duplicate()
+                    .map_err(|error| format!("image lease: {error:?}"))
+                    .and_then(|handle| {
+                        scarlet_ui::shared_nv12_texture(
+                            handle,
+                            frame.width,
+                            frame.height,
+                            frame.conversion,
+                        )
+                        .map_err(|error| error.to_string())
+                    });
+                match result {
+                    Ok(texture) => Some(texture),
+                    Err(error) => {
+                        eprintln!("moonlight: NV12 image adoption failed: {error}");
+                        None
+                    }
+                }
+            });
+            self.source = source;
+        }
+        fn requires_buffer_render_for_paint(&self) -> bool {
+            true
+        }
+        fn emits_paint_extension(&self) -> bool {
+            true
+        }
+        fn paint<'a>(&'a self, ctx: &mut PaintContext<'a>, origin: Point) -> bool {
+            ctx.fill_rect(Rect::new(origin, self.size), Color::BLACK);
+            if let Some(image) = &self.image {
+                let (width, height) = fit_size(
+                    image.width(),
+                    image.height(),
+                    self.size.width as u32,
+                    self.size.height as u32,
+                );
+                if width != 0 && height != 0 {
+                    let at = Point::new(
+                        origin.x + (self.size.width - width as f32) * 0.5,
+                        origin.y + (self.size.height - height as f32) * 0.5,
+                    );
+                    image.paint(ctx, Rect::new(at, Size::new(width as f32, height as f32)));
+                }
             }
+            true
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn update(&mut self, new_view: &dyn View) -> UpdateResult {
+            let Some(view) = new_view.as_any().downcast_ref::<SharedVideoView>() else {
+                return UpdateResult::Replaced;
+            };
+            self.view = view.clone();
+            UpdateResult::Updated
         }
     }
+}
 
-    fn store_bgra8(
-        pixels: &mut [u8],
-        offset: usize,
-        red: Simd<u8, 8>,
-        green: Simd<u8, 8>,
-        blue: Simd<u8, 8>,
-    ) {
-        let packed = blue.cast::<u32>()
-            | (green.cast::<u32>() << Simd::splat(8))
-            | (red.cast::<u32>() << Simd::splat(16))
-            | Simd::splat(0xff00_0000);
-        for (lane, pixel) in packed.to_array().iter().enumerate() {
-            // SAFETY: `offset` identifies eight complete BGRA pixels in
-            // `pixels`; unaligned writes avoid imposing a u32 alignment.
-            unsafe {
-                (pixels.as_mut_ptr().add(offset + lane * 4) as *mut u32).write_unaligned(*pixel);
-            }
-        }
+pub(crate) fn fit_size(
+    source_width: u32,
+    source_height: u32,
+    destination_width: u32,
+    destination_height: u32,
+) -> (u32, u32) {
+    if source_width == 0 || source_height == 0 || destination_width == 0 || destination_height == 0
+    {
+        return (0, 0);
     }
-
-    fn yuv_to_rgb_simd(
-        y: Simd<i32, 8>,
-        u: Simd<i32, 8>,
-        v: Simd<i32, 8>,
-    ) -> (Simd<u8, 8>, Simd<u8, 8>, Simd<u8, 8>) {
-        let c = (y - Simd::splat(16)).simd_max(Simd::splat(0));
-        let d = u - Simd::splat(128);
-        let e = v - Simd::splat(128);
-        let rounding = Simd::splat(128);
-        let red = (Simd::splat(298) * c + Simd::splat(409) * e + rounding) >> Simd::splat(8);
-        let green = (Simd::splat(298) * c - Simd::splat(100) * d - Simd::splat(208) * e + rounding)
-            >> Simd::splat(8);
-        let blue = (Simd::splat(298) * c + Simd::splat(516) * d + rounding) >> Simd::splat(8);
-        (
-            clamp_u8_simd(red),
-            clamp_u8_simd(green),
-            clamp_u8_simd(blue),
-        )
-    }
-
-    fn clamp_u8_simd(value: Simd<i32, 8>) -> Simd<u8, 8> {
-        value
-            .simd_clamp(Simd::splat(0), Simd::splat(255))
-            .cast::<u8>()
-    }
-
-    fn yuv_to_rgb(y: i32, u: i32, v: i32) -> (u8, u8, u8) {
-        let c = (y - 16).max(0);
-        let d = u - 128;
-        let e = v - 128;
-        let red = (298 * c + 409 * e + 128) >> 8;
-        let green = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        let blue = (298 * c + 516 * d + 128) >> 8;
-        (clamp_u8(red), clamp_u8(green), clamp_u8(blue))
-    }
-
-    fn clamp_u8(value: i32) -> u8 {
-        value.clamp(0, 255) as u8
+    let width_limited = u64::from(destination_width) * u64::from(source_height)
+        <= u64::from(destination_height) * u64::from(source_width);
+    if width_limited {
+        let height = (u64::from(destination_width) * u64::from(source_height)
+            / u64::from(source_width)) as u32;
+        (destination_width, height.max(1))
+    } else {
+        let width = (u64::from(destination_height) * u64::from(source_width)
+            / u64::from(source_height)) as u32;
+        (width.max(1), destination_height)
     }
 }
 
@@ -401,21 +346,18 @@ impl VideoOutput {
     }
 
     #[cfg(target_os = "scarlet")]
-    pub(crate) fn present_nv12(
+    pub(crate) fn present_image(
         &self,
-        width: u32,
-        height: u32,
-        timestamp_us: u64,
-        nv12: &[u8],
+        image: scarlet_video_client::DecodedImage,
     ) -> Result<(), String> {
-        self.platform
-            .present_nv12(width, height, timestamp_us, nv12)
+        self.platform.present_image(image)
     }
 
     pub(crate) fn view(&self) -> VideoSurfaceView {
         VideoSurfaceView {
             output: self.clone(),
             event_handler: None,
+            touch_handler: None,
         }
     }
 }
@@ -424,9 +366,18 @@ impl VideoOutput {
 pub(crate) struct VideoSurfaceView {
     output: VideoOutput,
     event_handler: Option<VideoEventHandler>,
+    touch_handler: Option<VideoTouchHandler>,
 }
 
 impl VideoSurfaceView {
+    pub(crate) fn on_touch(
+        mut self,
+        handler: impl Fn(scarlet_ui::event::TouchChange, (u32, u32), (u32, u32)) -> bool + 'static,
+    ) -> Self {
+        self.touch_handler = Some(Rc::new(handler));
+        self
+    }
+
     pub(crate) fn on_event(mut self, handler: impl Fn(&Event) -> bool + 'static) -> Self {
         self.event_handler = Some(Rc::new(handler));
         self
@@ -463,7 +414,7 @@ fn build_video_surface(surface: &VideoSurfaceView) -> Box<dyn View> {
         surface
             .output
             .platform
-            .canvas(surface.event_handler.clone()),
+            .view(surface.event_handler.clone(), surface.touch_handler.clone()),
     )
 }
 
@@ -479,13 +430,22 @@ fn build_video_surface(surface: &VideoSurfaceView) -> Box<dyn View> {
     )
 }
 
-#[cfg(all(test, target_os = "scarlet"))]
+#[cfg(test)]
 mod tests {
-    use super::platform::fit_size;
+    use super::fit_size;
 
     #[test]
     fn video_fit_preserves_aspect_ratio() {
         assert_eq!(fit_size(1920, 1080, 960, 660), (960, 540));
         assert_eq!(fit_size(1920, 1080, 800, 800), (800, 450));
+        assert_eq!(fit_size(1080, 1920, 1280, 720), (405, 720));
+        assert_eq!(fit_size(1920, 1080, 1280, 720), (1280, 720));
+    }
+
+    #[test]
+    fn minimized_video_has_no_draw_extent() {
+        assert_eq!(fit_size(1920, 1080, 0, 720), (0, 0));
+        assert_eq!(fit_size(1920, 1080, 1280, 0), (0, 0));
+        assert_eq!(fit_size(0, 0, 1280, 720), (0, 0));
     }
 }

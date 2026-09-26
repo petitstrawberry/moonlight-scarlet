@@ -56,6 +56,7 @@ pub(crate) enum ShortcutDispatch {
 
 #[derive(Default)]
 struct PressedInput {
+    touches: crate::touch::TouchInput,
     keys: BTreeSet<u16>,
     mouse_buttons: u8,
     suppressed_mouse_buttons: u8,
@@ -69,6 +70,18 @@ pub(crate) struct RemoteInput {
 }
 
 impl RemoteInput {
+    pub(crate) fn send_touch(
+        &self,
+        control: &ConnectionControl,
+        change: scarlet_ui::event::TouchChange,
+        viewport: (u32, u32),
+        video: (u32, u32),
+    ) -> Result<bool, InputError> {
+        lock(&self.state)
+            .touches
+            .handle(change, viewport, video, control)
+    }
+
     pub(crate) fn reset(&self) {
         *lock(&self.state) = PressedInput::default();
     }
@@ -192,22 +205,47 @@ impl RemoteInput {
         Ok(())
     }
 
+    /// Unlocking the pointer must not cancel independent touch or key input.
+    pub(crate) fn release_mouse(
+        &self,
+        control: Option<&ConnectionControl>,
+    ) -> Result<(), InputError> {
+        let buttons = {
+            let mut state = lock(&self.state);
+            state.suppressed_mouse_buttons = 0;
+            std::mem::take(&mut state.mouse_buttons)
+        };
+        let Some(control) = control else {
+            return Ok(());
+        };
+        let mut first_error = None;
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            if buttons & mouse_button_bit(button) != 0
+                && let Err(error) =
+                    control.send_mouse_button(remote_mouse_button(button), InputAction::Release)
+            {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
     pub(crate) fn release_all(
         &self,
         control: Option<&ConnectionControl>,
     ) -> Result<(), InputError> {
-        let (keys, mouse_buttons) = {
+        let (keys, mouse_buttons, mut touches) = {
             let mut state = lock(&self.state);
             let keys = std::mem::take(&mut state.keys);
             let mouse_buttons = std::mem::take(&mut state.mouse_buttons);
             state.suppressed_mouse_buttons = 0;
-            (keys, mouse_buttons)
+            (keys, mouse_buttons, std::mem::take(&mut state.touches))
         };
         let Some(control) = control else {
             return Ok(());
         };
 
-        let mut first_error = None;
+        let mut first_error = touches.release(control).err();
         for key_code in keys {
             if let Err(error) =
                 control.send_keyboard(key_code, InputAction::Release, RemoteModifiers::default())
@@ -345,6 +383,22 @@ mod tests {
             alt: true,
             super_key: false,
         }
+    }
+
+    #[test]
+    fn releasing_mouse_preserves_held_keyboard_input() {
+        let input = RemoteInput::default();
+        {
+            let mut state = lock(&input.state);
+            state.keys.insert(0x41);
+            state.mouse_buttons = mouse_button_bit(MouseButton::Left);
+            state.suppressed_mouse_buttons = mouse_button_bit(MouseButton::Right);
+        }
+        input.release_mouse(None).unwrap();
+        let state = lock(&input.state);
+        assert!(state.keys.contains(&0x41));
+        assert_eq!(state.mouse_buttons, 0);
+        assert_eq!(state.suppressed_mouse_buttons, 0);
     }
 
     #[test]

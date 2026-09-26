@@ -131,7 +131,7 @@ fn consume_video(
     progress: &mut impl FnMut(String),
 ) -> Result<(), String> {
     use scarlet_video_client::{
-        DecoderOptions, ScarletVideoDecoder, VideoBufferRequest, VideoFormat,
+        DecodedOutput, DecoderOptions, ScarletVideoDecoder, VideoBufferRequest, VideoFormat,
         recommended_input_buffer_len, recommended_nv12_output_buffer_len,
     };
 
@@ -142,7 +142,9 @@ fn consume_video(
     let output_len = recommended_nv12_output_buffer_len(setup.width(), setup.height())
         .ok_or_else(|| String::from("failed to size the hardware decoder output buffer"))?;
     let mut decoder = ScarletVideoDecoder::open_with_options(
-        DecoderOptions::new().with_buffer_request(VideoBufferRequest::new(input_len, output_len)),
+        DecoderOptions::new()
+            .with_buffer_request(VideoBufferRequest::new(input_len, output_len))
+            .with_shared_images(true),
     )?;
     decoder.configure(VideoFormat::H264)?;
     progress(String::from("Scarlet H.264 decoder ready"));
@@ -168,7 +170,7 @@ fn consume_video(
             frame.complete(VideoFrameStatus::NeedIdr);
             return Err(error);
         }
-        let decoded = match decoder.dequeue() {
+        let decoded = match decoder.dequeue_output() {
             Ok(decoded) => decoded,
             Err(error) => {
                 frame.complete(VideoFrameStatus::NeedIdr);
@@ -177,21 +179,22 @@ fn consume_video(
         };
 
         if let Some(decoded) = decoded {
-            if let Err(error) = video_output.present_nv12(
-                decoded.width(),
-                decoded.height(),
-                decoded.timestamp(),
-                decoded.payload(),
-            ) {
+            let DecodedOutput::Image(decoded) = decoded else {
+                frame.complete(VideoFrameStatus::NeedIdr);
+                return Err(String::from(
+                    "Moonlight requires shared NV12 decoder output",
+                ));
+            };
+            let visible = decoded.descriptor().visible;
+            if let Err(error) = video_output.present_image(decoded) {
                 frame.complete(VideoFrameStatus::NeedIdr);
                 return Err(error);
             }
             frame_count = frame_count.saturating_add(1);
             if frame_count == 1 {
                 progress(format!(
-                    "Decoded first {}x{} NV12 frame",
-                    decoded.width(),
-                    decoded.height()
+                    "Presented first {}x{} shared NV12 frame (GPU color conversion/scaling)",
+                    visible.width, visible.height
                 ));
             }
         }
