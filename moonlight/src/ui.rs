@@ -13,6 +13,7 @@ use scarlet_ui::{
     WindowContext, hstack, vstack, zstack,
 };
 
+use crate::gamepad::RemoteGamepads;
 use crate::input::{RemoteInput, ShortcutDispatch, StreamShortcut};
 use crate::video::VideoOutput;
 
@@ -84,6 +85,8 @@ struct MoonlightApp {
     selected_license: State<usize>,
     video_output: VideoOutput,
     remote_input: RemoteInput,
+    remote_gamepads: RemoteGamepads,
+    gamepad_navigation_applied: Option<bool>,
     stream_input_focused: State<bool>,
     pointer_lock_desired: State<bool>,
     pointer_lock_applied: State<bool>,
@@ -115,6 +118,8 @@ impl MoonlightApp {
             stream_control: State::new(StateId::new(13), None),
             video_output: VideoOutput::new(),
             remote_input: RemoteInput::default(),
+            remote_gamepads: RemoteGamepads::default(),
+            gamepad_navigation_applied: None,
             stream_input_focused: State::new(StateId::new(14), false),
             pointer_lock_desired: State::new(StateId::new(15), false),
             pointer_lock_applied: State::new(StateId::new(16), false),
@@ -263,6 +268,7 @@ impl MoonlightApp {
         self.session_details.set(String::new());
         self.video_output.reset();
         self.remote_input.reset();
+        self.remote_gamepads.reset_session();
         self.stream_input_focused.set(false);
         self.pointer_lock_desired.set(false);
 
@@ -276,10 +282,13 @@ impl MoonlightApp {
         let video_output = self.video_output.clone();
         let stream_ui = self.clone();
         let window_title = self.window_title.clone();
+        let launch_config = LaunchConfig {
+            gamepad_mask: u32::from(self.remote_gamepads.active_mask()),
+            ..LaunchConfig::default()
+        };
         thread::spawn(move || {
-            let result = GameStreamClient::load_default().and_then(|client| {
-                client.start_session(&connected, &application, LaunchConfig::default())
-            });
+            let result = GameStreamClient::load_default()
+                .and_then(|client| client.start_session(&connected, &application, launch_config));
 
             match result {
                 Ok(session) => {
@@ -483,6 +492,9 @@ impl MoonlightApp {
 
     fn leave_stream_mode(&self) {
         let control = self.stream_control.get();
+        if let Err(error) = self.remote_gamepads.release_all(control.as_ref()) {
+            report_input_error(error);
+        }
         if let Err(error) = self.remote_input.release_all(control.as_ref()) {
             report_input_error(error);
         }
@@ -493,6 +505,7 @@ impl MoonlightApp {
 
     fn reset_stream_window_state(&self) {
         self.remote_input.reset();
+        self.remote_gamepads.reset_session();
         self.pointer_lock_desired.set(false);
         self.fullscreen_desired.set(false);
         self.stream_input_focused.set(false);
@@ -1288,7 +1301,37 @@ fn build_connection_heading(heading: &ConnectionHeading) -> Box<dyn View> {
 }
 
 impl Application for MoonlightApp {
+    fn on_gamepad(&mut self, _ctx: &WindowContext, event: GamepadEvent) {
+        self.remote_gamepads.observe(event);
+        if self.selected_page.get() == STREAM_PAGE
+            && self.gamepad_navigation_applied == Some(false)
+            && let Some(control) = self.stream_control.get()
+            && let Err(error) = self.remote_gamepads.sync(&control)
+        {
+            report_input_error(error);
+        }
+    }
+
     fn on_window_sync(&mut self, _ctx: &WindowContext, window: &mut dyn PlatformWindow) {
+        let streaming =
+            self.selected_page.get() == STREAM_PAGE && self.stream_control.get().is_some();
+        let navigation = !streaming;
+        if self.gamepad_navigation_applied != Some(navigation) {
+            match window.set_gamepad_input(true, navigation) {
+                Ok(()) => self.gamepad_navigation_applied = Some(navigation),
+                Err(error) => eprintln!("moonlight: failed to configure gamepad input: {error}"),
+            }
+        }
+        // Replay devices observed in menus when streaming starts, and retry
+        // failed packets. Unchanged snapshots do not enqueue network traffic.
+        if streaming
+            && self.gamepad_navigation_applied == Some(false)
+            && let Some(control) = self.stream_control.get()
+            && let Err(error) = self.remote_gamepads.sync(&control)
+        {
+            report_input_error(error);
+        }
+
         let window_title = self.window_title.get();
         if window_title != self.applied_window_title {
             window.set_title(&window_title);
@@ -1358,6 +1401,9 @@ impl Application for MoonlightApp {
 
     fn on_focus_changed(&mut self, _window_id: u32, _app_name: &str, _menu_titles: &str) {
         let control = self.stream_control.get();
+        if let Err(error) = self.remote_gamepads.release_all(control.as_ref()) {
+            report_input_error(error);
+        }
         if let Err(error) = self.remote_input.release_all(control.as_ref()) {
             report_input_error(error);
         }

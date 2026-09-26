@@ -6,6 +6,7 @@
 use std::num::NonZeroU32;
 
 mod audio;
+mod gamepad;
 mod input;
 mod licenses;
 mod stream;

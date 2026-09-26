@@ -14,8 +14,9 @@ mod scarlet;
 
 pub use audio::{AudioRenderer, AudioSetup};
 pub use connection::{
-    Connection, ConnectionControl, ConnectionError, HostConnectionInfo, InputAction, InputError,
-    KeyboardModifiers, MouseButton, StreamConfiguration, VideoFrame, VideoFrameStatus, VideoSetup,
+    Connection, ConnectionControl, ConnectionError, ControllerButton, ControllerState,
+    HostConnectionInfo, InputAction, InputError, KeyboardModifiers, MouseButton,
+    StreamConfiguration, VideoFrame, VideoFrameStatus, VideoSetup,
 };
 
 /// Pinned upstream `moonlight-common-c` revision used by this port.

@@ -89,6 +89,24 @@ unsafe extern "C" {
     ) -> c_int;
     fn LiSendHighResScrollEvent(scroll_amount: c_short) -> c_int;
     fn LiSendHighResHScrollEvent(scroll_amount: c_short) -> c_int;
+    fn LiSendMultiControllerEvent(
+        controller_number: c_short,
+        active_gamepad_mask: c_short,
+        button_flags: c_int,
+        left_trigger: u8,
+        right_trigger: u8,
+        left_x: c_short,
+        left_y: c_short,
+        right_x: c_short,
+        right_y: c_short,
+    ) -> c_int;
+    fn LiSendControllerArrivalEvent(
+        controller_number: u8,
+        active_gamepad_mask: u16,
+        controller_type: u8,
+        supported_buttons: u32,
+        capabilities: u16,
+    ) -> c_int;
 }
 
 /// Host fields required by `moonlight-common-c` after launch or resume.
@@ -406,9 +424,47 @@ impl KeyboardModifiers {
     }
 }
 
+/// Standard Xbox-layout buttons from `Limelight.h`.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerButton {
+    Up = 0x0001,
+    Down = 0x0002,
+    Left = 0x0004,
+    Right = 0x0008,
+    Start = 0x0010,
+    Back = 0x0020,
+    LeftStick = 0x0040,
+    RightStick = 0x0080,
+    LeftShoulder = 0x0100,
+    RightShoulder = 0x0200,
+    Home = 0x0400,
+    A = 0x1000,
+    B = 0x2000,
+    X = 0x4000,
+    Y = 0x8000,
+}
+
+/// Complete controller snapshot; sticks use signed 16-bit coordinates, Y up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ControllerState {
+    /// Bitmap composed from [`ControllerButton`] values.
+    pub buttons: u32,
+    /// Analog trigger pressure from 0 (released) to 255.
+    pub left_trigger: u8,
+    /// Analog trigger pressure from 0 (released) to 255.
+    pub right_trigger: u8,
+    pub left_x: i16,
+    pub left_y: i16,
+    pub right_x: i16,
+    pub right_y: i16,
+}
+
 /// Error returned when remote input cannot be queued.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputError {
+    /// Controller numbers must be in the protocol range 0..16.
+    InvalidController(u8),
     /// The connection has already stopped or is not ready for input.
     ConnectionInactive,
     /// `moonlight-common-c` rejected or could not allocate an input packet.
@@ -423,6 +479,9 @@ pub enum InputError {
 impl fmt::Display for InputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidController(number) => {
+                write!(formatter, "invalid controller number {number}")
+            }
             Self::ConnectionInactive => formatter.write_str("stream input is not active"),
             Self::Core { operation, code } => {
                 write!(formatter, "{operation} input failed with {code}")
@@ -565,6 +624,50 @@ impl ConnectionControl {
             // SAFETY: the active Sunshine core accepts one C `short` wheel
             // amount for its horizontal-scroll extension.
             unsafe { LiSendHighResHScrollEvent(amount) }
+        })
+    }
+
+    /// Announce an Xbox-layout controller with analog triggers and no feedback
+    /// capabilities. `active_mask` includes this controller's bit. Sunshine
+    /// supports slots 0..16; GFE hosts only support slots 0..4.
+    pub fn send_controller_arrival(&self, number: u8, active_mask: u16) -> Result<(), InputError> {
+        if number >= 16 {
+            return Err(InputError::InvalidController(number));
+        }
+        self.send_input("controller arrival", || {
+            // SAFETY: scalar types match Limelight.h; 1 is Xbox type and the
+            // analog-trigger capability. Only standard buttons are advertised.
+            unsafe { LiSendControllerArrivalEvent(number, active_mask, 1, 0xF7FF, 1) }
+        })
+    }
+
+    /// Queue a complete snapshot. To remove a controller, clear its bit in
+    /// `active_mask` and send the default (neutral) state.
+    pub fn send_controller(
+        &self,
+        number: u8,
+        active_mask: u16,
+        state: ControllerState,
+    ) -> Result<(), InputError> {
+        if number >= 16 {
+            return Err(InputError::InvalidController(number));
+        }
+        self.send_input("controller", || {
+            // SAFETY: the active core owns the queue; scalar widths match the
+            // C signature. The mask cast preserves all 16 protocol bits.
+            unsafe {
+                LiSendMultiControllerEvent(
+                    i16::from(number),
+                    active_mask as i16,
+                    state.buttons as c_int,
+                    state.left_trigger,
+                    state.right_trigger,
+                    state.left_x,
+                    state.left_y,
+                    state.right_x,
+                    state.right_y,
+                )
+            }
         })
     }
 
@@ -1034,8 +1137,9 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     use super::{
-        ConnectionControl, ConnectionState, HostConnectionInfo, HostStrings, InputAction,
-        InputError, KeyboardModifiers, MouseButton, StreamConfiguration, wire_key_code,
+        ConnectionControl, ConnectionState, ControllerState, HostConnectionInfo, HostStrings,
+        InputAction, InputError, KeyboardModifiers, MouseButton, StreamConfiguration,
+        wire_key_code,
     };
 
     #[test]
@@ -1112,6 +1216,22 @@ mod tests {
         assert_eq!(
             control.send_keyboard(0x41, InputAction::Press, KeyboardModifiers::default(),),
             Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller_arrival(15, 0x8000),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller(15, 0x8000, ControllerState::default()),
+            Err(InputError::ConnectionInactive)
+        );
+        assert_eq!(
+            control.send_controller_arrival(16, 1),
+            Err(InputError::InvalidController(16))
+        );
+        assert_eq!(
+            control.send_controller(255, 1, ControllerState::default()),
+            Err(InputError::InvalidController(255))
         );
     }
 }

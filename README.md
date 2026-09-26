@@ -26,6 +26,7 @@ UI, and platform media/input integration.
 | Video presentation | Unsupported | NV12 to BGRA in ScarletUI |
 | Audio output | Unsupported | Opus multistream via libopus to SAS |
 | Keyboard/mouse input | ScarletUI/Winit | ScarletUI/SWS with pointer capture |
+| Gamepad input | No native Winit backend yet | ScarletUI/SWS snapshots to Sunshine |
 
 The decoder and decoded-frame presentation path are compiled only for Scarlet;
 the macOS development build intentionally has no software-video fallback. It
@@ -35,6 +36,16 @@ code for host-side development and tests.
 During a stream, click the video surface to capture input. The desktop-client
 shortcuts `Ctrl+Alt+Shift+Z`, `Ctrl+Alt+Shift+Q`, and `Ctrl+Alt+Shift+X` toggle
 input capture, disconnect the stream, and toggle fullscreen respectively.
+
+On Scarlet, gamepads control the remote game while the stream window is focused;
+mouse capture is not required. Face buttons use Xbox positions (south=A,
+east=B, west=X, north=Y). D-pad, shoulders, Start/Select, stick clicks, both
+sticks, and analog or digital triggers are forwarded. Sunshine supports up to
+16 pads, with stable player slots while attached. Device resets, focus changes,
+and leaving the stream release remote controller input. Menu navigation is
+enabled outside the stream and disabled during streaming. This requires an SWS
+version with native gamepad input support; rumble, motion sensors, and touchpads
+are not implemented.
 
 Successfully connected hosts are remembered in the platform configuration
 directory and restored on the next launch. Core native-component license and
