@@ -53,6 +53,10 @@ also sent as synthetic keyboard navigation. The desktop-client
 shortcuts `Ctrl+Alt+Shift+Z`, `Ctrl+Alt+Shift+Q`, and `Ctrl+Alt+Shift+X` toggle
 mouse capture, disconnect the stream, and toggle fullscreen respectively.
 
+**Settings > Swap A/B** exchanges only the A and B buttons sent to the host.
+It is off by default, preserving incoming button identities. The choice is
+saved in `settings.json` in the platform configuration directory.
+
 Successfully connected hosts are remembered in the platform configuration
 directory and restored on the next launch. Core native-component license and
 attribution text is available from **Settings > Open source licenses**.

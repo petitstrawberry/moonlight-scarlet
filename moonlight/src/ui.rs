@@ -3,8 +3,8 @@
 use std::thread;
 
 use moonlight_control::{
-    Application as StreamApplication, ConnectProgress, ConnectedHost, GameStreamClient,
-    LaunchConfig, SavedHosts, SessionPhase, StreamSession,
+    Application as StreamApplication, ClientSettings, ConnectProgress, ConnectedHost,
+    GameStreamClient, LaunchConfig, SavedHosts, SessionPhase, StreamSession,
 };
 use moonlight_sys::{ConnectionControl, InputError};
 use scarlet_ui::prelude::*;
@@ -23,7 +23,7 @@ const WINDOW_WIDTH: f32 = 960.0;
 const WINDOW_HEIGHT: f32 = 720.0;
 const TOOLBAR_HEIGHT: f32 = 48.0;
 const TOOLBAR_CONTROL_SIZE: f32 = 36.0;
-const SETTINGS_CONTENT_HEIGHT: f32 = 550.0;
+const SETTINGS_CONTENT_HEIGHT: f32 = 700.0;
 const LICENSES_CONTENT_HEIGHT: f32 = 775.0;
 const LICENSE_LINE_HEIGHT: f32 = 18.0;
 const LICENSE_TEXT_VERTICAL_PADDING: f32 = 44.0;
@@ -53,6 +53,17 @@ const LICENSE_DETAIL_PAGE: usize = 6;
 /// Success after the application exits, or a ScarletUI platform error.
 pub fn run() -> scarlet_ui::Result<()> {
     let mut app = MoonlightApp::new();
+    match ClientSettings::load_default() {
+        Ok(settings) => {
+            app.swap_ab.set(settings.swap_ab);
+            app.remote_gamepads.set_swap_ab(settings.swap_ab);
+        }
+        Err(error) => {
+            app.settings_error
+                .set(format!("Could not load settings: {error}"));
+            eprintln!("moonlight: failed to load settings: {error}");
+        }
+    }
     let saved_host = match SavedHosts::load_default() {
         Ok(saved) => saved.last_connected().map(str::to_owned),
         Err(error) => {
@@ -86,6 +97,8 @@ struct MoonlightApp {
     video_output: VideoOutput,
     remote_input: RemoteInput,
     remote_gamepads: RemoteGamepads,
+    swap_ab: State<bool>,
+    settings_error: State<String>,
     gamepad_navigation_applied: Option<bool>,
     native_window_id: Option<u32>,
     stream_input_focused: State<bool>,
@@ -120,6 +133,8 @@ impl MoonlightApp {
             video_output: VideoOutput::new(),
             remote_input: RemoteInput::default(),
             remote_gamepads: RemoteGamepads::default(),
+            swap_ab: State::new(StateId::new(24), false),
+            settings_error: State::new(StateId::new(25), String::new()),
             gamepad_navigation_applied: None,
             native_window_id: None,
             stream_input_focused: State::new(StateId::new(14), false),
@@ -912,9 +927,25 @@ impl MoonlightApp {
         MoonlightScreen::new(toolbar, body)
     }
 
+    fn toggle_swap_ab(&self) {
+        let enabled = !self.swap_ab.get();
+        match (ClientSettings { swap_ab: enabled }).save_default() {
+            Ok(()) => {
+                self.remote_gamepads.set_swap_ab(enabled);
+                self.swap_ab.set(enabled);
+                self.settings_error.set(String::new());
+            }
+            Err(error) => {
+                self.settings_error
+                    .set(format!("Could not save settings: {error}"));
+            }
+        }
+    }
+
     fn settings_screen(&self) -> impl View + Clone + use<> {
         let back = self.clone();
         let licenses = self.clone();
+        let swap_ab = self.clone();
         let toolbar = moonlight_toolbar(
             String::from("Settings"),
             Button::icon_only(Icon::ArrowLeft)
@@ -932,6 +963,22 @@ impl MoonlightApp {
                 settings_row("Frame rate", "60 FPS"),
                 settings_row("Video codec", "H.264"),
                 settings_row("Audio", "Stereo · 48 kHz"),
+                vstack! {
+                    Text::new("CONTROLLER")
+                        .font_size(12.0)
+                        .color(MUTED_TEXT_COLOR),
+                    settings_link_row("Swap A/B", if self.swap_ab.get() { "On" } else { "Off" }, move || {
+                        swap_ab.toggle_swap_ab()
+                    }),
+                    Text::new("Exchange A and B for streamed games.")
+                        .font_size(12.0)
+                        .color(MUTED_TEXT_COLOR),
+                    Text::new(self.settings_error.get())
+                        .font_size(12.0)
+                        .color(DANGER_COLOR),
+                }
+                .alignment(Alignment::Leading)
+                .spacing(10.0),
                 Text::new("ABOUT THIS BUILD")
                     .font_size(12.0)
                     .color(MUTED_TEXT_COLOR),

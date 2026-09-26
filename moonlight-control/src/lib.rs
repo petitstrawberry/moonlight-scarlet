@@ -8,6 +8,7 @@ mod client;
 mod crypto;
 mod hosts;
 mod session;
+mod settings;
 mod xml;
 
 use std::net::IpAddr;
@@ -17,6 +18,7 @@ pub use client::{
 };
 pub use hosts::SavedHosts;
 pub use session::{LaunchConfig, StreamSession};
+pub use settings::ClientSettings;
 
 /// A host that can provide a GameStream-compatible session.
 #[derive(Clone, Debug, PartialEq, Eq)]

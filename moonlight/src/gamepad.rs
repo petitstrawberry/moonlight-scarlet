@@ -60,6 +60,7 @@ fn trace_state(slot: u8, mask: u16, state: ControllerState) {
 struct Gamepads {
     devices: [Option<Device>; MAX_GAMEPADS],
     sent: [Option<Device>; MAX_GAMEPADS],
+    swap_ab: bool,
 }
 
 impl Gamepads {
@@ -102,9 +103,17 @@ impl Gamepads {
             }
         }
         for slot in 0..MAX_GAMEPADS {
-            let Some(device) = self.devices[slot] else {
+            let Some(mut device) = self.devices[slot] else {
                 continue;
             };
+            if self.swap_ab {
+                let a = Button::A as u32;
+                let b = Button::B as u32;
+                let buttons = device.state.buttons;
+                device.state.buttons = (buttons & !(a | b))
+                    | if buttons & a != 0 { b } else { 0 }
+                    | if buttons & b != 0 { a } else { 0 };
+            }
             if self.sent[slot].is_none() {
                 send(Packet::Arrival {
                     slot: slot as u8,
@@ -152,6 +161,10 @@ impl RemoteGamepads {
 
     pub(crate) fn active_mask(&self) -> u16 {
         mask(&self.lock().devices)
+    }
+
+    pub(crate) fn set_swap_ab(&self, enabled: bool) {
+        self.lock().swap_ab = enabled;
     }
 
     pub(crate) fn sync(&self, control: &ConnectionControl) -> Result<(), InputError> {
@@ -257,6 +270,44 @@ mod tests {
             })
             .unwrap();
         packets
+    }
+
+    #[test]
+    fn swap_ab_updates_held_buttons_without_changing_other_controls() {
+        let mut gamepads = Gamepads::default();
+        let mut input = event(7);
+        input.buttons = (1 << GamepadButton::South as u8) | (1 << GamepadButton::West as u8);
+        input.left_x = 1234;
+        gamepads.observe(input);
+        flush(&mut gamepads);
+        let original = gamepads.sent[0].unwrap().state;
+        assert_eq!(original.buttons, Button::A as u32 | Button::X as u32);
+
+        gamepads.swap_ab = true;
+        let packets = flush(&mut gamepads);
+        assert_eq!(packets.len(), 1);
+        let swapped = gamepads.sent[0].unwrap().state;
+        assert_eq!(swapped.buttons, Button::B as u32 | Button::X as u32);
+        assert_eq!(swapped.left_x, original.left_x);
+        assert!(flush(&mut gamepads).is_empty());
+
+        input.buttons |= 1 << GamepadButton::East as u8;
+        gamepads.observe(input);
+        flush(&mut gamepads);
+        assert_eq!(
+            gamepads.sent[0].unwrap().state.buttons,
+            Button::A as u32 | Button::B as u32 | Button::X as u32
+        );
+        input.buttons = 0;
+        gamepads.observe(input);
+        flush(&mut gamepads);
+        assert_eq!(gamepads.sent[0].unwrap().state.buttons, 0);
+
+        gamepads.swap_ab = false;
+        input.buttons = 1 << GamepadButton::South as u8;
+        gamepads.observe(input);
+        flush(&mut gamepads);
+        assert_eq!(gamepads.sent[0].unwrap().state.buttons, Button::A as u32);
     }
 
     #[test]
