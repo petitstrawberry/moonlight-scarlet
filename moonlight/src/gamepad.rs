@@ -34,8 +34,25 @@ impl Packet {
                 eprintln!("moonlight: announced gamepad slot {slot} (mask={mask:#06x})");
                 Ok(())
             }
-            Self::State { slot, mask, state } => control.send_controller(slot, mask, state),
+            Self::State { slot, mask, state } => {
+                control.send_controller(slot, mask, state)?;
+                trace_state(slot, mask, state);
+                Ok(())
+            }
         }
+    }
+}
+
+fn trace_state(slot: u8, mask: u16, state: ControllerState) {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static COUNT: AtomicU32 = AtomicU32::new(0);
+    if *ENABLED
+        .get_or_init(|| std::env::var("MOONLIGHT_INPUT_TRACE").is_ok_and(|value| value == "1"))
+        && COUNT.fetch_add(1, Ordering::Relaxed) < 128
+    {
+        eprintln!("moonlight: queued gamepad slot={slot} mask={mask:#06x} {state:?}");
     }
 }
 

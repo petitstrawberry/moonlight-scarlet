@@ -87,6 +87,7 @@ struct MoonlightApp {
     remote_input: RemoteInput,
     remote_gamepads: RemoteGamepads,
     gamepad_navigation_applied: Option<bool>,
+    native_window_id: Option<u32>,
     stream_input_focused: State<bool>,
     pointer_lock_desired: State<bool>,
     pointer_lock_applied: State<bool>,
@@ -120,6 +121,7 @@ impl MoonlightApp {
             remote_input: RemoteInput::default(),
             remote_gamepads: RemoteGamepads::default(),
             gamepad_navigation_applied: None,
+            native_window_id: None,
             stream_input_focused: State::new(StateId::new(14), false),
             pointer_lock_desired: State::new(StateId::new(15), false),
             pointer_lock_applied: State::new(StateId::new(16), false),
@@ -1323,6 +1325,10 @@ fn build_connection_heading(heading: &ConnectionHeading) -> Box<dyn View> {
 }
 
 impl Application for MoonlightApp {
+    fn on_window_created(&mut self, _ctx: &WindowContext, window: &mut dyn PlatformWindow) {
+        self.native_window_id = Some(window.surface_id());
+    }
+
     fn on_gamepad(&mut self, _ctx: &WindowContext, event: GamepadEvent) {
         self.remote_gamepads.observe(event);
         if self.selected_page.get() == STREAM_PAGE
@@ -1421,7 +1427,12 @@ impl Application for MoonlightApp {
         }
     }
 
-    fn on_focus_changed(&mut self, _window_id: u32, _app_name: &str, _menu_titles: &str) {
+    fn on_focus_changed(&mut self, window_id: u32, _app_name: &str, _menu_titles: &str) {
+        // SWS broadcasts focus acquisition as well as loss to every window.
+        // Re-focusing our video must not remove the remote controller.
+        if self.native_window_id == Some(window_id) {
+            return;
+        }
         let control = self.stream_control.get();
         if let Err(error) = self.remote_gamepads.release_all(control.as_ref()) {
             report_input_error(error);
@@ -1706,6 +1717,21 @@ mod tests {
             phase: WheelPhase::Moved,
             source: ScrollSource::Wheel,
         }))
+    }
+
+    #[test]
+    fn gaining_own_window_focus_keeps_gamepad_but_losing_it_releases() {
+        let mut app = MoonlightApp::new();
+        app.native_window_id = Some(17);
+        app.remote_gamepads.observe(GamepadEvent {
+            device_id: 42,
+            buttons: 1,
+            ..GamepadEvent::default()
+        });
+        app.on_focus_changed(17, "Moonlight", "");
+        assert_eq!(app.remote_gamepads.active_mask(), 1);
+        app.on_focus_changed(18, "Files", "");
+        assert_eq!(app.remote_gamepads.active_mask(), 0);
     }
 
     #[test]
