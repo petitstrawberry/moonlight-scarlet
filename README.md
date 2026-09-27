@@ -57,6 +57,12 @@ mouse capture, disconnect the stream, and toggle fullscreen respectively.
 It is off by default, preserving incoming button identities. The choice is
 saved in `settings.json` in the platform configuration directory.
 
+**Settings > Video bitrate** selects 1–100 Mbps in 1 Mbps steps, with touch-sized
+minus/plus buttons and 5/10/20/40 Mbps presets. The default remains 20 Mbps.
+Changes are saved with the controller preference and apply when connecting or
+reconnecting a stream. Tap settings rows to activate them and swipe vertically
+to scroll; scrolling does not activate the row under your finger.
+
 Successfully connected hosts are remembered in the platform configuration
 directory and restored on the next launch. Core native-component license and
 attribution text is available from **Settings > Open source licenses**.

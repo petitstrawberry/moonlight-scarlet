@@ -22,6 +22,8 @@ pub struct LaunchConfig {
     pub height: u32,
     /// Requested video frame rate.
     pub fps: u32,
+    /// Requested video bitrate for the streaming transport, in kbps.
+    pub bitrate_kbps: u32,
     /// Allow Sunshine to adjust the host display for the requested mode.
     pub optimize_game_settings: bool,
     /// Continue playing audio on the Sunshine host.
@@ -38,6 +40,7 @@ impl Default for LaunchConfig {
             width: 1_920,
             height: 1_080,
             fps: 60,
+            bitrate_kbps: 20_000,
             optimize_game_settings: true,
             play_audio_on_host: false,
             gamepad_mask: 0,
@@ -52,6 +55,9 @@ impl LaunchConfig {
             return Err(ControlError::Session(
                 "stream width, height, and FPS must be non-zero".to_owned(),
             ));
+        }
+        if self.bitrate_kbps == 0 || self.bitrate_kbps > i32::MAX as u32 {
+            return Err(ControlError::Session("invalid video bitrate".into()));
         }
         Ok(())
     }

@@ -39,7 +39,8 @@ pub fn run(
         session.config.fps,
         session.remote_input_aes_key,
         session.remote_input_aes_iv,
-    );
+    )
+    .with_bitrate_kbps(session.config.bitrate_kbps);
     progress(format!(
         "Connecting stream for {}",
         session.application.title
@@ -59,10 +60,11 @@ pub fn run(
     let control = connection.control();
     started(control.clone());
     progress(format!(
-        "Streaming {}x{} at {} FPS",
+        "Streaming {}x{} at {} FPS, {} kbps",
         setup.width(),
         setup.height(),
-        setup.fps()
+        setup.fps(),
+        session.config.bitrate_kbps
     ));
 
     let video_result = consume_video(

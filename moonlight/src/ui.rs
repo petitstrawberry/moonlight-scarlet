@@ -21,9 +21,9 @@ const APP_ID: &str = "org.scarlet-os.moonlight";
 const DEFAULT_WINDOW_TITLE: &str = "Moonlight";
 const WINDOW_WIDTH: f32 = 960.0;
 const WINDOW_HEIGHT: f32 = 720.0;
-const TOOLBAR_HEIGHT: f32 = 48.0;
-const TOOLBAR_CONTROL_SIZE: f32 = 36.0;
-const SETTINGS_CONTENT_HEIGHT: f32 = 700.0;
+const TOOLBAR_HEIGHT: f32 = 56.0;
+const TOOLBAR_CONTROL_SIZE: f32 = 44.0;
+const SETTINGS_CONTENT_HEIGHT: f32 = 850.0;
 const LICENSES_CONTENT_HEIGHT: f32 = 775.0;
 const LICENSE_LINE_HEIGHT: f32 = 18.0;
 const LICENSE_TEXT_VERTICAL_PADDING: f32 = 44.0;
@@ -56,6 +56,7 @@ pub fn run() -> scarlet_ui::Result<()> {
     match ClientSettings::load_default() {
         Ok(settings) => {
             app.swap_ab.set(settings.swap_ab);
+            app.bitrate_mbps.set(settings.bitrate_mbps);
             app.remote_gamepads.set_swap_ab(settings.swap_ab);
         }
         Err(error) => {
@@ -98,6 +99,7 @@ struct MoonlightApp {
     remote_input: RemoteInput,
     remote_gamepads: RemoteGamepads,
     swap_ab: State<bool>,
+    bitrate_mbps: State<u32>,
     settings_error: State<String>,
     gamepad_navigation_applied: Option<bool>,
     native_window_id: Option<u32>,
@@ -134,6 +136,7 @@ impl MoonlightApp {
             remote_input: RemoteInput::default(),
             remote_gamepads: RemoteGamepads::default(),
             swap_ab: State::new(StateId::new(24), false),
+            bitrate_mbps: State::new(StateId::new(26), ClientSettings::default().bitrate_mbps),
             settings_error: State::new(StateId::new(25), String::new()),
             gamepad_navigation_applied: None,
             native_window_id: None,
@@ -300,6 +303,7 @@ impl MoonlightApp {
         let stream_ui = self.clone();
         let window_title = self.window_title.clone();
         let launch_config = LaunchConfig {
+            bitrate_kbps: self.bitrate_mbps.get() * 1000,
             gamepad_mask: u32::from(self.remote_gamepads.active_mask()),
             ..LaunchConfig::default()
         };
@@ -662,7 +666,8 @@ impl MoonlightApp {
                 Button::icon_only(Icon::Settings)
                     .icon_color(TEXT_COLOR)
                     .header_style()
-                    .on_click(move || settings.open_settings()),
+                    .on_click(move || settings.open_settings())
+                    .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             }
             .spacing(8.0),
         );
@@ -780,13 +785,15 @@ impl MoonlightApp {
             Button::icon_only(Icon::ArrowLeft)
                 .icon_color(TEXT_COLOR)
                 .header_style()
-                .on_click(move || back.go_back()),
+                .on_click(move || back.go_back())
+                .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             hstack! {
                 quit_button,
                 Button::icon_only(Icon::Settings)
                     .icon_color(TEXT_COLOR)
                     .header_style()
-                    .on_click(move || settings.open_settings()),
+                    .on_click(move || settings.open_settings())
+                    .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             }
             .spacing(8.0),
         );
@@ -880,7 +887,8 @@ impl MoonlightApp {
             Button::icon_only(Icon::ArrowLeft)
                 .icon_color(TEXT_COLOR)
                 .header_style()
-                .on_click(move || back.go_back()),
+                .on_click(move || back.go_back())
+                .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             Spacer::new().frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
         );
         let body = zstack! {
@@ -928,11 +936,25 @@ impl MoonlightApp {
     }
 
     fn toggle_swap_ab(&self) {
-        let enabled = !self.swap_ab.get();
-        match (ClientSettings { swap_ab: enabled }).save_default() {
+        self.save_settings(ClientSettings {
+            swap_ab: !self.swap_ab.get(),
+            bitrate_mbps: self.bitrate_mbps.get(),
+        });
+    }
+
+    fn set_bitrate_mbps(&self, bitrate_mbps: u32) {
+        self.save_settings(ClientSettings {
+            swap_ab: self.swap_ab.get(),
+            bitrate_mbps,
+        });
+    }
+
+    fn save_settings(&self, settings: ClientSettings) {
+        match settings.save_default() {
             Ok(()) => {
-                self.remote_gamepads.set_swap_ab(enabled);
-                self.swap_ab.set(enabled);
+                self.remote_gamepads.set_swap_ab(settings.swap_ab);
+                self.swap_ab.set(settings.swap_ab);
+                self.bitrate_mbps.set(settings.bitrate_mbps);
                 self.settings_error.set(String::new());
             }
             Err(error) => {
@@ -946,12 +968,14 @@ impl MoonlightApp {
         let back = self.clone();
         let licenses = self.clone();
         let swap_ab = self.clone();
+        let bitrate = self.clone();
         let toolbar = moonlight_toolbar(
             String::from("Settings"),
             Button::icon_only(Icon::ArrowLeft)
                 .icon_color(TEXT_COLOR)
                 .header_style()
-                .on_click(move || back.go_back()),
+                .on_click(move || back.go_back())
+                .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             Spacer::new().frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
         );
         let body = ScrollView::new(
@@ -961,6 +985,10 @@ impl MoonlightApp {
                     .color(MUTED_TEXT_COLOR),
                 settings_row("Resolution", "1920 × 1080"),
                 settings_row("Frame rate", "60 FPS"),
+                bitrate_control(self.bitrate_mbps.get(), move |value| bitrate.set_bitrate_mbps(value)),
+                Text::new("Applied on the next connection. Lower the bitrate if video stalls.")
+                    .font_size(12.0)
+                    .color(MUTED_TEXT_COLOR),
                 settings_row("Video codec", "H.264"),
                 settings_row("Audio", "Stereo · 48 kHz"),
                 vstack! {
@@ -979,14 +1007,16 @@ impl MoonlightApp {
                 }
                 .alignment(Alignment::Leading)
                 .spacing(10.0),
-                Text::new("ABOUT THIS BUILD")
-                    .font_size(12.0)
-                    .color(MUTED_TEXT_COLOR),
-                settings_row("Control plane", "macOS and Scarlet"),
-                settings_row("Video decoding", platform_video_summary()),
-                settings_link_row("Open source licenses", "View", move || {
-                    licenses.open_licenses()
-                }),
+                vstack! {
+                    Text::new("ABOUT THIS BUILD")
+                        .font_size(12.0)
+                        .color(MUTED_TEXT_COLOR),
+                    settings_row("Control plane", "macOS and Scarlet"),
+                    settings_row("Video decoding", platform_video_summary()),
+                    settings_link_row("Open source licenses", "View", move || {
+                        licenses.open_licenses()
+                    }),
+                }.alignment(Alignment::Leading).spacing(10.0),
             }
             .alignment(Alignment::Leading)
             .spacing(10.0)
@@ -1008,7 +1038,8 @@ impl MoonlightApp {
             Button::icon_only(Icon::ArrowLeft)
                 .icon_color(TEXT_COLOR)
                 .header_style()
-                .on_click(move || back.go_back()),
+                .on_click(move || back.go_back())
+                .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             Spacer::new().frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
         );
         let body = ScrollView::new(
@@ -1061,7 +1092,8 @@ impl MoonlightApp {
             Button::icon_only(Icon::ArrowLeft)
                 .icon_color(TEXT_COLOR)
                 .header_style()
-                .on_click(move || back.go_back()),
+                .on_click(move || back.go_back())
+                .frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
             Spacer::new().frame(TOOLBAR_CONTROL_SIZE, TOOLBAR_CONTROL_SIZE),
         );
         let body = ScrollView::new(
@@ -1225,6 +1257,11 @@ impl View for AppPage {
             STREAM_PAGE => vec![
                 &self.app.pointer_lock_applied as &dyn scarlet_ui::Listenable,
                 &self.app.fullscreen_desired as &dyn scarlet_ui::Listenable,
+            ],
+            SETTINGS_PAGE => vec![
+                &self.app.swap_ab as &dyn scarlet_ui::Listenable,
+                &self.app.bitrate_mbps as &dyn scarlet_ui::Listenable,
+                &self.app.settings_error as &dyn scarlet_ui::Listenable,
             ],
             LICENSE_DETAIL_PAGE => {
                 vec![&self.app.selected_license as &dyn scarlet_ui::Listenable]
@@ -1642,6 +1679,58 @@ where
     .separator(TOOLBAR_COLOR)
 }
 
+fn bitrate_control<F>(value: u32, on_change: F) -> impl View + Clone + use<F>
+where
+    F: Fn(u32) + Clone + 'static,
+{
+    let decrease = on_change.clone();
+    let increase = on_change.clone();
+    let preset = |rate| {
+        let change = on_change.clone();
+        Button::new(format!("{rate} Mbps"))
+            .font_size(13.0)
+            .text_color(TEXT_COLOR)
+            .background_color(if value == rate {
+                ACCENT_COLOR
+            } else {
+                SURFACE_RAISED_COLOR
+            })
+            .on_click(move || change(rate))
+            .frame(82.0, 44.0)
+    };
+    vstack! {
+        hstack! {
+            Text::new("Video bitrate").font_size(15.0).color(TEXT_COLOR),
+            Spacer::new(),
+            Button::new("−")
+                .font_size(22.0)
+                .text_color(TEXT_COLOR)
+                .background_color(SURFACE_RAISED_COLOR)
+                .on_click(move || decrease(value.saturating_sub(1).max(ClientSettings::MIN_BITRATE_MBPS)))
+                .frame(48.0, 48.0),
+            Text::new(format!("{value} Mbps"))
+                .font_size(17.0)
+                .color(TEXT_COLOR)
+                .alignment(Alignment::Center)
+                .frame(88.0, 48.0),
+            Button::new("+")
+                .font_size(22.0)
+                .text_color(TEXT_COLOR)
+                .background_color(SURFACE_RAISED_COLOR)
+                .on_click(move || increase(value.saturating_add(1).min(ClientSettings::MAX_BITRATE_MBPS)))
+                .frame(48.0, 48.0),
+        }.alignment(Alignment::Center).spacing(8.0),
+        hstack! { preset(5), preset(10), preset(20), preset(40) }
+            .alignment(Alignment::Center).spacing(8.0),
+    }
+    .alignment(Alignment::Leading)
+    .spacing(8.0)
+    .padding(12.0)
+    .frame(f32::INFINITY, 124.0)
+    .background(SURFACE_COLOR)
+    .border_rounded(BORDER_COLOR, 1.0, 3.0)
+}
+
 fn settings_row(label: &'static str, value: &'static str) -> impl View + Clone + use<> {
     hstack! {
         Text::new(label).font_size(15.0).color(TEXT_COLOR),
@@ -1747,7 +1836,135 @@ fn platform_video_summary() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scarlet_ui::event::{TouchChange, TouchFrame, TouchPhase};
     use scarlet_ui::{RenderingPipeline, ScrollSource, WheelPhase};
+    use std::{cell::Cell, rc::Rc};
+
+    fn touch(serial: u64, phase: TouchPhase, x: i32, y: i32) -> Event {
+        Event::TouchFrame(TouchFrame {
+            seat_id: 0,
+            serial,
+            time_ns: serial * 16_000_000,
+            changes: vec![TouchChange {
+                seat_id: 0,
+                serial,
+                time_ns: serial * 16_000_000,
+                id: 1,
+                phase,
+                x,
+                y,
+                pressure: None,
+                touch_major: None,
+            }],
+        })
+    }
+
+    fn button_center(element: &dyn Element, label: &str, origin: Point) -> Option<Point> {
+        let origin = Point::new(
+            origin.x + element.position().x,
+            origin.y + element.position().y,
+        );
+        if let Some(button) = element
+            .as_any()
+            .downcast_ref::<RenderElement<Button, scarlet_ui::views::ButtonRenderObject>>()
+            && button.view().label() == label
+        {
+            let size = element.bounds().size;
+            assert!(size.width >= 44.0 && size.height >= 44.0);
+            return Some(Point::new(
+                origin.x + size.width / 2.0,
+                origin.y + size.height / 2.0,
+            ));
+        }
+        element
+            .children()
+            .iter()
+            .find_map(|child| button_center(child.as_ref(), label, origin))
+    }
+
+    #[test]
+    fn bitrate_buttons_accept_native_touch_without_mouse_events() {
+        let selected = Rc::new(Cell::new(20));
+        let changed = selected.clone();
+        let mut pipeline = RenderingPipeline::new();
+        pipeline.set_paint_enabled(false);
+        pipeline.set_root(bitrate_control(20, move |value| changed.set(value)).create_element());
+        pipeline
+            .element_tree_mut()
+            .layout(LayoutConstraints::tight(680.0, 124.0));
+        for (index, (label, expected)) in [("10 Mbps", 10), ("−", 19), ("+", 21)]
+            .into_iter()
+            .enumerate()
+        {
+            let point =
+                button_center(pipeline.element_tree().root().unwrap(), label, Point::ZERO).unwrap();
+            let serial = (index as u64) * 2 + 1;
+            pipeline.handle_event(&touch(
+                serial,
+                TouchPhase::Down,
+                point.x as i32,
+                point.y as i32,
+            ));
+            pipeline.handle_event(&touch(
+                serial + 1,
+                TouchPhase::Up,
+                point.x as i32,
+                point.y as i32,
+            ));
+            assert_eq!(selected.get(), expected);
+        }
+    }
+
+    #[test]
+    fn settings_rows_tap_once_and_scroll_without_accidental_activation() {
+        let taps = Rc::new(Cell::new(0));
+        let changed = taps.clone();
+        let mut pipeline = RenderingPipeline::new();
+        pipeline.set_paint_enabled(false);
+        pipeline.set_root(
+            ScrollView::new(settings_link_row("Swap A/B", "Off", move || {
+                changed.set(changed.get() + 1)
+            }))
+            .vertical()
+            .content_size(0.0, 850.0)
+            .create_element(),
+        );
+        pipeline
+            .element_tree_mut()
+            .layout(LayoutConstraints::tight(680.0, 480.0));
+        pipeline.handle_event(&touch(1, TouchPhase::Down, 100, 25));
+        assert_eq!(taps.get(), 0);
+        pipeline.handle_event(&touch(2, TouchPhase::Up, 100, 25));
+        assert_eq!(taps.get(), 1);
+        pipeline.handle_event(&touch(3, TouchPhase::Down, 100, 25));
+        assert!(pipeline.handle_event(&touch(4, TouchPhase::Move, 100, -75)));
+        pipeline.handle_event(&touch(5, TouchPhase::Up, 100, -75));
+        assert_eq!(taps.get(), 1);
+    }
+
+    #[test]
+    fn settings_changes_repaint_without_leaving_the_page() {
+        let app = MoonlightApp::new();
+        let mut pipeline = RenderingPipeline::new();
+        pipeline.set_root(AppPage::new(app.clone(), SETTINGS_PAGE).create_element());
+        pipeline.layout_initial();
+        pipeline.resize(Size::new(680.0, 480.0));
+        let before = pipeline.render().unwrap().data().to_vec();
+        app.bitrate_mbps.set(10);
+        let after = pipeline.render().unwrap().data().to_vec();
+        assert_ne!(
+            before, after,
+            "bitrate text and preset highlight must update immediately"
+        );
+        if let Ok(directory) = std::env::var("MOONLIGHT_SETTINGS_PREVIEW_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join("settings-680x480.bgra"),
+                after,
+            )
+            .unwrap();
+        }
+    }
 
     fn consumes_vertical_wheel(view: impl View + 'static) -> bool {
         let mut pipeline = RenderingPipeline::new();
@@ -1839,10 +2056,9 @@ mod tests {
                 .listenables()
                 .is_empty()
         );
-        assert!(
-            AppPage::new(app.clone(), SETTINGS_PAGE)
-                .listenables()
-                .is_empty()
+        assert_eq!(
+            AppPage::new(app.clone(), SETTINGS_PAGE).listenables().len(),
+            3
         );
         assert_eq!(AppPage::new(app, STREAM_PAGE).listenables().len(), 2);
     }
