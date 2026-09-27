@@ -1,6 +1,6 @@
 //! Safe ownership around the singleton `moonlight-common-c` connection.
 
-use std::ffi::{CString, c_char, c_int, c_short, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_short, c_void};
 use std::fmt;
 use std::marker::PhantomData;
 use std::ptr;
@@ -33,6 +33,34 @@ const KEY_CODE_VIRTUAL_KEY: u16 = 0x8000;
 
 static CONNECTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CORE_CONNECTION_LOCK: Mutex<()> = Mutex::new(());
+// Separate from CORE_CONNECTION_LOCK: stopping the core joins its workers.
+// Never hold this gate while joining, since termination can arrive on a worker.
+static VIDEO_WAKE_STATE: Mutex<Option<Arc<ConnectionState>>> = Mutex::new(None);
+
+fn lock_video_wake_state() -> MutexGuard<'static, Option<Arc<ConnectionState>>> {
+    VIDEO_WAKE_STATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn mls_rust_connection_terminated() {
+    let state = lock_video_wake_state();
+    if state.is_some() {
+        // SAFETY: registration only spans a successfully initialized queue;
+        // teardown unregisters under this same gate before destroying it.
+        unsafe { mls_wake_video_frame() };
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn mls_rust_core_log(message: *const c_char) {
+    if !message.is_null() {
+        // SAFETY: the C bridge supplies a NUL-terminated stack buffer for this call.
+        let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+        eprintln!("moonlight-core: {}", message.trim_end());
+    }
+}
 
 unsafe extern "C" {
     fn mls_start_connection(
@@ -528,6 +556,7 @@ impl ConnectionControl {
     /// Request orderly shutdown and wake a worker blocked on the next frame.
     pub fn request_stop(&self) {
         self.state.stop_requested.store(true, Ordering::Release);
+        let _guard = lock_video_wake_state();
         if self.state.active.load(Ordering::Acquire) {
             // SAFETY: waking the singleton pull-renderer queue is valid while
             // the corresponding connection state remains active.
@@ -908,6 +937,7 @@ impl Connection {
             active: AtomicBool::new(true),
             stop_requested: AtomicBool::new(false),
         });
+        *lock_video_wake_state() = Some(Arc::clone(&state));
         Ok(Self {
             _host_strings: host_strings,
             state,
@@ -984,7 +1014,10 @@ impl Connection {
     /// A frame that must be completed before requesting another, or `None`
     /// when the queue is woken for shutdown.
     pub fn wait_for_video_frame(&mut self) -> Result<Option<VideoFrame<'_>>, ConnectionError> {
-        if self.stopped || self.state.stop_requested.load(Ordering::Acquire) {
+        if self.stopped
+            || self.state.stop_requested.load(Ordering::Acquire)
+            || self.termination_error().is_some()
+        {
             return Ok(None);
         }
         let mut frame_handle = ptr::null_mut();
@@ -1056,10 +1089,14 @@ impl Connection {
         }
         self.state.stop_requested.store(true, Ordering::Release);
         let _guard = lock_core_connection();
+        {
+            let mut wake_state = lock_video_wake_state();
+            self.state.active.store(false, Ordering::Release);
+            *wake_state = None;
+        }
         // SAFETY: this object exclusively owns the active singleton connection.
         unsafe { mls_stop_connection() };
         clear_audio_renderer();
-        self.state.active.store(false, Ordering::Release);
         CONNECTION_ACTIVE.store(false, Ordering::Release);
         self.stopped = true;
     }
@@ -1223,6 +1260,57 @@ mod tests {
         InputAction, InputError, KeyboardModifiers, MouseButton, StreamConfiguration,
         wire_key_code,
     };
+
+    #[test]
+    fn termination_wakes_empty_video_queue_and_is_safe_outside_its_lifetime() {
+        unsafe extern "C" {
+            fn initializeVideoDepacketizer(packet_size: std::ffi::c_int);
+            fn destroyVideoDepacketizer();
+        }
+
+        let _core = super::lock_core_connection();
+        // No queue exists yet: an early callback must not access it.
+        super::mls_rust_connection_terminated();
+        // SAFETY: this test owns the singleton core lock and no connection is active.
+        unsafe { initializeVideoDepacketizer(1024) };
+        let state = Arc::new(ConnectionState {
+            active: AtomicBool::new(true),
+            stop_requested: AtomicBool::new(false),
+        });
+        *super::lock_video_wake_state() = Some(Arc::clone(&state));
+
+        // A callback just before entering the wait must not be lost.
+        super::mls_rust_connection_terminated();
+        let wait = || {
+            let mut handle = std::ptr::null_mut();
+            let mut unit = std::ptr::null_mut();
+            // SAFETY: the queue stays initialized until this worker is joined.
+            assert!(!unsafe { super::mls_wait_video_frame(&mut handle, &mut unit) });
+            assert!(handle.is_null());
+            assert!(unit.is_null());
+        };
+        wait();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait();
+            sender.send(()).unwrap();
+        });
+        super::mls_rust_connection_terminated();
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("termination must wake frame wait");
+        worker.join().unwrap();
+
+        {
+            let mut registered = super::lock_video_wake_state();
+            state.active.store(false, super::Ordering::Release);
+            *registered = None;
+        }
+        // SAFETY: the consumer has exited and no callback can reach this queue.
+        unsafe { destroyVideoDepacketizer() };
+        super::mls_rust_connection_terminated();
+        ConnectionControl { state }.request_stop();
+    }
 
     #[test]
     fn validates_default_h264_stream_configuration() {

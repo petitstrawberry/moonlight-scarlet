@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #define MLS_NO_ERROR INT_MIN
@@ -17,6 +19,21 @@ static atomic_int mls_video_format;
 static atomic_int mls_video_width;
 static atomic_int mls_video_height;
 static atomic_int mls_video_fps;
+
+extern void mls_rust_connection_terminated(void);
+extern void mls_rust_core_log(const char* message);
+
+static void mls_log_message(const char* format, ...) {
+    char message[1024];
+    va_list args;
+    va_start(args, format);
+    int length = vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (length > 0) {
+        message[sizeof(message) - 1] = '\0';
+        mls_rust_core_log(message);
+    }
+}
 
 extern int mls_rust_audio_init(int configuration, int sample_rate,
                                int channel_count, int streams,
@@ -44,6 +61,7 @@ static void mls_connection_started_callback(void) {
 
 static void mls_connection_terminated(int error_code) {
     atomic_store_explicit(&mls_termination_error, error_code, memory_order_release);
+    mls_rust_connection_terminated();
 }
 
 static int mls_video_setup_callback(int video_format, int width, int height,
@@ -153,6 +171,7 @@ int mls_start_connection(
     listener.stageFailed = mls_stage_failed;
     listener.connectionStarted = mls_connection_started_callback;
     listener.connectionTerminated = mls_connection_terminated;
+    listener.logMessage = mls_log_message;
 
     LiInitializeVideoCallbacks(&video);
     video.setup = mls_video_setup_callback;
