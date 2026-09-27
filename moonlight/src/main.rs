@@ -8,6 +8,8 @@ mod gamepad;
 mod input;
 mod licenses;
 mod stream;
+#[cfg(target_os = "scarlet")]
+mod stream_diagnostics;
 mod touch;
 mod ui;
 mod video;

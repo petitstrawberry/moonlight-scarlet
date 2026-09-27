@@ -150,16 +150,20 @@ fn consume_video(
     )?;
     decoder.configure(VideoFormat::H264)?;
     progress(String::from("Scarlet H.264 decoder ready"));
+    use crate::stream_diagnostics::{Monitor, Stage};
+    let monitor = Monitor::start()?;
 
     let mut frame_count = 0_u64;
     let mut audio_error_reported = false;
     while !control.stop_requested() {
+        monitor.enter(Stage::Receive);
         let Some(frame) = connection
             .wait_for_video_frame()
             .map_err(|error| error.to_string())?
         else {
             break;
         };
+        monitor.enter(Stage::Copy);
         let presentation_time_us = frame.presentation_time_us();
         let access_unit = match frame.copy_access_unit() {
             Ok(access_unit) => access_unit,
@@ -168,10 +172,12 @@ fn consume_video(
                 return Err(error.to_string());
             }
         };
+        monitor.enter(Stage::Submit);
         if let Err(error) = decoder.submit(&access_unit, presentation_time_us) {
             frame.complete(VideoFrameStatus::NeedIdr);
             return Err(error);
         }
+        monitor.enter(Stage::Dequeue);
         let decoded = match decoder.dequeue_output() {
             Ok(decoded) => decoded,
             Err(error) => {
@@ -180,6 +186,7 @@ fn consume_video(
             }
         };
 
+        monitor.enter(Stage::Present);
         if let Some(decoded) = decoded {
             let DecodedOutput::Image(decoded) = decoded else {
                 frame.complete(VideoFrameStatus::NeedIdr);
@@ -200,6 +207,7 @@ fn consume_video(
                 ));
             }
         }
+        monitor.enter(Stage::Complete);
         frame.complete(VideoFrameStatus::Complete);
         report_audio_error(connection, &mut audio_error_reported, progress);
     }
