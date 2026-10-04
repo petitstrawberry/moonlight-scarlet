@@ -9,6 +9,7 @@
 void* malloc(size_t size);
 void* calloc(size_t count, size_t size);
 void* aligned_alloc(size_t alignment, size_t size);
+int posix_memalign(void** pointer, size_t alignment, size_t size);
 void* realloc(void* pointer, size_t size);
 void free(void* pointer);
 void abort(void) __attribute__((noreturn));

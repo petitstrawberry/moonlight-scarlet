@@ -378,6 +378,11 @@ extern "C" fn scarlet_errno_location() -> *mut c_int {
 }
 
 #[unsafe(no_mangle)]
+extern "C" fn getpid() -> c_int {
+    std::process::id() as c_int
+}
+
+#[unsafe(no_mangle)]
 extern "C" fn scarlet_monotonic_time_ns() -> u64 {
     (unsafe {
         // SAFETY: MonotonicTime takes no pointers and only reads the kernel clock.
@@ -499,6 +504,28 @@ unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void
     }
     // SAFETY: Alignment and size were validated above.
     unsafe { allocate_with_alignment(size, alignment) }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn posix_memalign(
+    result: *mut *mut c_void,
+    alignment: usize,
+    size: usize,
+) -> c_int {
+    if result.is_null()
+        || !alignment.is_power_of_two()
+        || alignment % std::mem::size_of::<*mut c_void>() != 0
+    {
+        return EINVAL;
+    }
+    // SAFETY: The alignment is valid and the allocation uses our matching free.
+    let allocation = unsafe { allocate_with_alignment(size, alignment) };
+    if allocation.is_null() {
+        return ENOMEM;
+    }
+    // SAFETY: The caller supplies a writable pointer; failures leave it untouched.
+    unsafe { result.write(allocation) };
+    0
 }
 
 #[unsafe(no_mangle)]
