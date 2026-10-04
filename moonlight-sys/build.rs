@@ -116,12 +116,6 @@ fn build_mbedcrypto(source_dir: &Path, config: &Path, platform_include: Option<&
 }
 
 fn configure_scarlet_arch(build: &mut cc::Build) {
-    // The cross C compiler targets Linux, while Scarlet uses our native
-    // compatibility headers and does not provide Linux-specific extensions.
-    build
-        .flag("-U__linux__")
-        .flag("-U__linux")
-        .flag("-U__gnu_linux__");
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("riscv64") {
         build.flag("-march=rv64gc").flag("-mabi=lp64d");
     }

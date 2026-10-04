@@ -199,14 +199,6 @@ void* memset(void* destination, int value, size_t length) {
     return destination;
 }
 
-/* Mbed TLS requires zeroization stores that cannot be optimized away. */
-void explicit_bzero(void* buffer, size_t length) {
-    volatile unsigned char* out = buffer;
-    for (size_t index = 0; index < length; index++) {
-        out[index] = 0;
-    }
-}
-
 int memcmp(const void* left, const void* right, size_t length) {
     const unsigned char* a = left;
     const unsigned char* b = right;
