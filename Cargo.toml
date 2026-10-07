@@ -13,11 +13,11 @@ moonlight-control = { path = "moonlight-control" }
 moonlight-sys = { path = "moonlight-sys" }
 # Keep the native runtime source identical to ScarletUI's SWS/SGFX dependencies.
 # Separate Git sources produce two scarlet-os copies with duplicate exported symbols.
-scarlet-os = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
-scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
-scarlet-video-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
-sas-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "b3d2a55740a3d2ca49daad0ec7baba233f706f7a" }
-scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", rev = "7136831fd071cdd38260d256b0768f080b14a73e", default-features = false }
+scarlet-os = { git = "https://github.com/petitstrawberry/Scarlet", rev = "d3b1c05127d4df3616f988b81a99f616e8a88064" }
+scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", rev = "d3b1c05127d4df3616f988b81a99f616e8a88064" }
+scarlet-video-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "d3b1c05127d4df3616f988b81a99f616e8a88064" }
+sas-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "d3b1c05127d4df3616f988b81a99f616e8a88064" }
+scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", rev = "ce807d0f2dfc978c60d7f3b807026455ee101da4", default-features = false }
 
 [patch.crates-io]
 ring = { git = "https://github.com/petitstrawberry/ring.git", branch = "scarlet" }
