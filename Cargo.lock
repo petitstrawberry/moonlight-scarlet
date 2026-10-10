@@ -610,7 +610,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2231,7 +2231,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2506,7 +2506,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2643,7 +2643,7 @@ dependencies = [
 [[package]]
 name = "scarlet-scroll-motion"
 version = "0.1.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "libm",
 ]
@@ -2667,7 +2667,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "scarlet-ui-core",
  "scarlet-ui-platform-sws",
@@ -2677,7 +2677,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-core"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "ab_glyph",
  "bitflags 2.13.1",
@@ -2695,7 +2695,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-icons-tabler"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "svgtypes",
 ]
@@ -2703,7 +2703,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-macros"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2713,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-platform-sws"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "sbus-client",
  "scarlet-desktop-config",
@@ -2727,7 +2727,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-platform-winit"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "block2",
  "objc2 0.5.2",
@@ -2745,7 +2745,7 @@ dependencies = [
 [[package]]
 name = "scarlet-ui-renderer-sgfx"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=ce807d0f2dfc978c60d7f3b807026455ee101da4#ce807d0f2dfc978c60d7f3b807026455ee101da4"
+source = "git+https://github.com/petitstrawberry/scarlet-ui?rev=1b0f08aeb0a7057c9a6d0d7312554372411afff8#1b0f08aeb0a7057c9a6d0d7312554372411afff8"
 dependencies = [
  "libm",
  "scarlet-ui-core",
@@ -2851,13 +2851,13 @@ dependencies = [
 [[package]]
 name = "sgfx"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
  "gpu-raw",
  "pollster",
  "raw-window-handle",
  "scarlet-os 1.0.0 (git+https://github.com/petitstrawberry/Scarlet?rev=d3b1c05127d4df3616f988b81a99f616e8a88064)",
- "sgfx-backend-abi 1.0.0 (git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b)",
+ "sgfx-backend-abi 1.0.0 (git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9)",
  "sgfx-backend-loader",
  "sgfx-backend-scarlet-adreno",
  "sgfx-backend-scarlet-virgl-compat",
@@ -2874,14 +2874,14 @@ source = "git+https://github.com/petitstrawberry/sgfx?rev=040dbb5cf42b75489504e1
 [[package]]
 name = "sgfx-backend-abi"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 
 [[package]]
 name = "sgfx-backend-loader"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
- "sgfx-backend-abi 1.0.0 (git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b)",
+ "sgfx-backend-abi 1.0.0 (git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9)",
 ]
 
 [[package]]
@@ -2900,7 +2900,7 @@ dependencies = [
 [[package]]
 name = "sgfx-backend-scarlet-virgl"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
  "gpu-raw",
  "scarlet-os 1.0.0 (git+https://github.com/petitstrawberry/Scarlet?rev=d3b1c05127d4df3616f988b81a99f616e8a88064)",
@@ -2911,7 +2911,7 @@ dependencies = [
 [[package]]
 name = "sgfx-backend-scarlet-virgl-compat"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
  "sgfx-backend-scarlet-virgl",
 ]
@@ -2919,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "sgfx-backend-wgpu"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
  "bytemuck",
  "naga",
@@ -2943,7 +2943,7 @@ dependencies = [
 [[package]]
 name = "sgfx-codegen-virgl"
 version = "1.0.0"
-source = "git+https://github.com/petitstrawberry/sgfx?rev=27f0ca95bf2406174a3c9915ca862e8f1179dd0b#27f0ca95bf2406174a3c9915ca862e8f1179dd0b"
+source = "git+https://github.com/petitstrawberry/sgfx?rev=20bb5b8cc19445520d08c31c3971ac06244bc1d9#20bb5b8cc19445520d08c31c3971ac06244bc1d9"
 dependencies = [
  "naga",
  "sgfx-core",
@@ -3261,7 +3261,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3954,7 +3954,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
