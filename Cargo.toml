@@ -17,7 +17,7 @@ scarlet-os = { git = "https://github.com/petitstrawberry/Scarlet", rev = "74b92f
 scarlet-sys = { git = "https://github.com/petitstrawberry/Scarlet", rev = "74b92fe8c43ba71467dd70083411c4574de01079" }
 scarlet-video-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "74b92fe8c43ba71467dd70083411c4574de01079" }
 sas-client = { git = "https://github.com/petitstrawberry/Scarlet", rev = "74b92fe8c43ba71467dd70083411c4574de01079" }
-scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", rev = "eede18df956fa4599027f783266c5879d1afe564", default-features = false }
+scarlet-ui = { git = "https://github.com/petitstrawberry/scarlet-ui", rev = "9c9067594f59e08b038b5dcc06b7f13c065cdba5", default-features = false }
 
 [patch.crates-io]
 ring = { git = "https://github.com/petitstrawberry/ring.git", branch = "scarlet" }
